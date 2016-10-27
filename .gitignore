@@ -1,0 +1,26 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs/TpmForIot/v14
+/ipch
+/TpmForIotTst/x64/Debug
+/TpmForIotTst/TpmForIotTst.vcxproj.filters
+/TpmForIotTst/TpmForIotTst.vcxproj.user
+/TSS.MSR.CPP/Samples
+/TSS.MSR.CPP/Src/.vs/TSS.CPP/v14
+/TSS.MSR.CPP/Src/ipch
+/TSS.MSR.CPP/Src/x64/Debug
+/x64/Debug
+
+*.a
+*.db
+*.dep
+*.o
+*.opendb
+*.so
+*.user
+/.vs/HardwareProtectedSsh/v14
+/CliTst/x64/Debug
+/CliTst/packages.config
+/packages/cpprestsdk.v140.windesktop.msvcstl.dyn.rt-dyn.2.8.0
