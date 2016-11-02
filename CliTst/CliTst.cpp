@@ -20,6 +20,196 @@ using namespace web::http::experimental::listener;
 extern void DllInit();
 
 //
+// Web API/REST client calls
+//
+
+// In case of any failure to fetch data from a service,
+// create a json object with "error" key and value containing the exception details.
+pplx::task<json::value> handle_exception(pplx::task<json::value>& t, const utility::string_t& field_name)
+{
+    try
+    {
+        t.get();
+    }
+    catch (const std::exception& ex)
+    {
+        json::value error_json = json::value::object();
+        error_json[field_name] = json::value::object();
+        error_json[field_name][U("error")] = json::value::string(utility::conversions::to_string_t(ex.what()));
+        return pplx::task_from_result<json::value>(error_json);
+    }
+
+    return t;
+}
+
+//
+// Check the Attestation Server whitelist for the specified TPM key hash
+//
+pplx::task<json::value> RestTpmKeyHashLookup(char *szKeyHashArg)
+{
+    uri_builder ub;
+    ub.set_host(U("strongnetsvc.jwsecure.com"));
+    ub.set_path(U("/bhtmvc/api/MbkAttestation/"));
+    ub.append_query(U("publicKeyHash"), szKeyHashArg);
+    ub.set_scheme(U("https"));
+    auto mbk_url = ub.to_string();
+
+    http_client mbk_client(mbk_url);
+    http_request request(methods::GET);
+    request.headers().set_content_type(U("application/json"));
+    return mbk_client.request(request).then([](http_response resp)
+    {
+        return resp.extract_json();
+    }).then([](json::value mbk_json)
+    {
+        json::value att_result_node = json::value::object();
+
+        if (false == mbk_json.is_null() &&
+            false == mbk_json[U("AttAttempt")].is_null())
+        {
+            att_result_node = mbk_json[U("AttAttempt")];
+            bool isVerified = att_result_node[U("Verified")].as_bool();
+            if (true == isVerified)
+                printf("Key is valid.\n");
+            else
+                printf("Key is invalid.\n");
+        }
+        else
+        {
+            // Event data is null, we hit an error.
+            att_result_node[U("MbkAttestation")] = json::value::object();
+            att_result_node[U("error")] = mbk_json[U("description")];
+        }
+
+        return att_result_node;
+    }).then([=](pplx::task<json::value> t)
+    {
+        return handle_exception(t, U("MbkAttestation"));
+    });
+}
+
+//
+// Request an AIK challenge from the Attestation Server 
+//
+bool RestGetActivation(
+    TPMT_PUBLIC &clientEkPub,
+    TPMT_PUBLIC &clientRestrictedPub,
+    ActivationData &activationData)
+{
+    uri_builder ub;
+
+    //
+    // Build the URI
+    //
+
+    ub.set_host(U("strongnetsvc.jwsecure.com"));
+    ub.set_path(U("/bhtmvc/api/LinuxActivation/"));
+    ub.set_scheme(U("https"));
+    auto mbk_url = ub.to_string();
+
+    http_client mbk_client(mbk_url);
+    http_request request(methods::POST);
+    request.headers().set_content_type(U("application/json"));
+
+    //
+    // Populate the request
+    //
+
+    json::value activation_req_node = json::value::object();
+    activation_req_node[U("EkPublic")] = web::json::value::string(
+        utility::conversions::to_base64(clientEkPub.ToBuf()));
+    activation_req_node[U("AikPublic")] = web::json::value::string(
+        utility::conversions::to_base64(clientRestrictedPub.ToBuf()));
+    request.set_body(activation_req_node);
+
+    //
+    // Send the request and wait
+    //
+
+    http_response resp = mbk_client.request(request).wait();
+    json::value challenge_result = resp.extract_json().wait();
+
+    //
+    // Decode and return the response
+    //
+
+    if (false == challenge_result.is_null() &&
+        false == challenge_result[U("Challenge")].is_null())
+    {
+        activationData.CredentialBlob = utility::conversions::from_base64(
+            challenge_result[U("ChallengeCredential")].as_string());
+        activationData.Secret = utility::conversions::from_base64(
+            challenge_result[U("ChallengeSecret")].as_string());
+
+        return true;
+    }
+
+    return false;
+}
+
+//
+// Validate platform attestation and key certification with the Attestation Server 
+//
+bool RestRegisterKey(
+    TPMT_PUBLIC &clientRestrictedPub,
+    PCR_ReadResponse &clientPcrVals,
+    QuoteResponse &clientPcrQuote,
+    TPMS_CREATION_DATA &clientKeyCreation,
+    CertifyCreationResponse &clientKeyQuote)
+{
+    uri_builder ub;
+
+    //
+    // Build the URI
+    //
+
+    ub.set_host(U("strongnetsvc.jwsecure.com"));
+    ub.set_path(U("/bhtmvc/api/LinuxCertifiedKey/"));
+    ub.set_scheme(U("https"));
+    auto mbk_url = ub.to_string();
+
+    http_client mbk_client(mbk_url);
+    http_request request(methods::POST);
+    request.headers().set_content_type(U("application/json"));
+
+    //
+    // Populate the request
+    //
+
+    json::value reg_req_node = json::value::object();
+    reg_req_node[U("AikPublic")] = web::json::value::string(
+        utility::conversions::to_base64(clientRestrictedPub.ToBuf()));
+    reg_req_node[U("Pcrs")] = web::json::value::string(
+        utility::conversions::to_base64(clientPcrVals.ToBuf()));
+    reg_req_node[U("PcrQuote")] = web::json::value::string(
+        utility::conversions::to_base64(clientPcrQuote.ToBuf()));
+    reg_req_node[U("KeyCreationData")] = web::json::value::string(
+        utility::conversions::to_base64(clientKeyCreation.ToBuf()));
+    reg_req_node[U("KeyQuote")] = web::json::value::string(
+        utility::conversions::to_base64(clientKeyQuote.ToBuf()));
+    request.set_body(reg_req_node);
+
+    //
+    // Send the request and wait
+    //
+
+    http_response resp = mbk_client.request(request).wait();
+    json::value reg_result = resp.extract_json().wait();
+
+    //
+    // Decode the response
+    //
+
+    if (false == reg_result.is_null() &&
+        false == reg_result[U("Id")].is_null())
+    {
+        return true;
+    }
+
+    return false;
+}
+
+//
 // Open the Endorsement Key
 //
 TPM_HANDLE MakeEndorsementKey(_TPMCPP Tpm2 &tpm)
@@ -499,8 +689,16 @@ void AttestationForIot()
     //
 
     ByteVec nameOfKeyToActivate = restrictedKey.GetName();
-    ActivationData encryptedSecret = ServerGetActivation(
-        ekPub, nameOfKeyToActivate);
+    //ActivationData encryptedSecret = ServerGetActivation(ekPub, nameOfKeyToActivate);
+    ActivationData encryptedSecret;
+    if (false == RestGetActivation(
+        ekPub,
+        restrictedPub,
+        encryptedSecret))
+    {
+        cout << "Server: RestGetActivation failed" << endl;
+        return;
+    }
 
     //
     // Activation data can only be decrypted on this TPM
@@ -588,13 +786,24 @@ void AttestationForIot()
     // Send the PCR quote and key certification to the server
     //
 
+    /*
     ServerRegisterKey(
         decryptedSecret,
         restrictedPub,
         pcrVals,
         quote,
         newSigningKey.creationData,
-        createQuote);
+        createQuote);*/
+    if (false == RestRegisterKey(
+        restrictedPub,
+        pcrVals,
+        quote,
+        newSigningKey.creationData,
+        createQuote))
+    {
+        cout << "Server: RestRegisterKey failed" << endl;
+        return;
+    }
 
     //
     // Sign a message with the user key
@@ -635,130 +844,6 @@ void AttestationForIot()
     tpm.FlushContext(restrictedKey);
 }
 
-// In case of any failure to fetch data from a service,
-// create a json object with "error" key and value containing the exception details.
-pplx::task<json::value> handle_exception(pplx::task<json::value>& t, const utility::string_t& field_name)
-{
-    try
-    {
-        t.get();
-    }
-    catch (const std::exception& ex)
-    {
-        json::value error_json = json::value::object();
-        error_json[field_name] = json::value::object();
-        error_json[field_name][U("error")] = json::value::string(utility::conversions::to_string_t(ex.what()));
-        return pplx::task_from_result<json::value>(error_json);
-    }
-
-    return t;
-}
-
-//
-// Check the Attestation Server whitelist for the specified TPM key hash
-//
-pplx::task<json::value> TpmKeyHashLookup(char *szKeyHashArg)
-{
-    //std::wstring svrUri(U("https://strongnetsvc.jwsecure.com"));
-    //std::wstring mbkApiPath(U("/bhtmvc/api/MbkAttestation/"));
-
-    /*
-    std::wostringstream stream;
-    stream << svrUri;
-    stream << mbkApiPath << L"/?publicKeyHash=";
-    stream << szKeyHashArg;
-    */
-
-    //uri_builder ub(svrUri + mbkApiPath);
-    uri_builder ub;
-    ub.set_host(U("strongnetsvc.jwsecure.com"));
-    ub.set_path(U("/bhtmvc/api/MbkAttestation/"));
-    ub.append_query(U("publicKeyHash"), szKeyHashArg);
-    ub.set_scheme(U("https"));
-    auto mbk_url = ub.to_string();
-
-    http_client mbk_client(mbk_url);
-    http_request request(methods::GET);
-    request.headers().set_content_type(U("application/json"));
-    return mbk_client.request(request).then([](http_response resp)
-    {
-        return resp.extract_json();
-    }).then([](json::value mbk_json)
-    {
-        json::value att_result_node = json::value::object();
-
-        if (false == mbk_json.is_null() &&
-            false == mbk_json[U("AttAttempt")].is_null())
-        {
-            att_result_node = mbk_json[U("AttAttempt")];
-            bool isVerified = att_result_node[U("Verified")].as_bool();
-            if (true == isVerified)
-                printf("Key is valid.\n");
-            else
-                printf("Key is invalid.\n");
-
-        /*
-            mbk_result_node[U("MbkAttestation")] = json::value::array();
-
-            int i = 0;
-            for (auto& iter : event_json[U("events")][U("event")].as_array())
-            {
-                const auto &event = iter;
-                auto iTitle = event.as_object().find(U("title"));
-                if (iTitle == event.as_object().end())
-                {
-                    throw web::json::json_exception(U("title key not found"));
-                }
-                event_result_node[events_json_key][i][U("title")] = iTitle->second;
-                auto iUrl = event.as_object().find(U("url"));
-                if (iUrl == event.as_object().end())
-                {
-                    throw web::json::json_exception(U("url key not found"));
-                }
-                event_result_node[events_json_key][i][U("url")] = iUrl->second;
-                auto iStartTime = event.as_object().find(U("start_time"));
-                if (iStartTime == event.as_object().end())
-                {
-                    throw web::json::json_exception(U("start_time key not found"));
-                }
-                event_result_node[events_json_key][i][U("starttime")] = iStartTime->second;
-                auto iDescription = event.as_object().find(U("description"));
-                if (iDescription == event.as_object().end())
-                {
-                    throw web::json::json_exception(U("descriotion key not found"));
-                }
-                event_result_node[events_json_key][i][U("description")] = iDescription->second;
-                auto iVenueAddress = event.as_object().find(U("venue_address"));
-                if (iVenueAddress == event.as_object().end())
-                {
-                    throw web::json::json_exception(U("venue_address key not found"));
-                }
-                auto iCityName = event.as_object().find(U("city_name"));
-                if (iCityName == event.as_object().end())
-                {
-                    throw web::json::json_exception(U("city_name key not found"));
-                }
-                event_result_node[events_json_key][i][U("venue_address")] = json::value::string(iVenueAddress->second.as_string() + U(" ") + iCityName->second.as_string());
-
-                if (i++ > num_events)
-                    break;
-            }
-            */
-        }
-        else
-        {
-            // Event data is null, we hit an error.
-            att_result_node[U("MbkAttestation")] = json::value::object();
-            att_result_node[U("error")] = mbk_json[U("description")];
-        }
-
-        return att_result_node;
-    }).then([=](pplx::task<json::value> t)
-    {
-        return handle_exception(t, U("MbkAttestation"));
-    });
-}
-
 //
 // Console entry point
 //
@@ -770,9 +855,10 @@ try {
 #endif
     
     if (2 == argc) {
-        std::vector<pplx::task<json::value>> tasks;
-        tasks.push_back(TpmKeyHashLookup(argv[1]));
-        pplx::when_all(tasks.begin(), tasks.end()).wait();
+        /*std::vector<pplx::task<json::value>> tasks;
+        tasks.push_back(RestTpmKeyHashLookup(argv[1]));
+        pplx::when_all(tasks.begin(), tasks.end()).wait();*/
+        RestTpmKeyHashLookup(argv[1]).wait();
     }
     else {
         AttestationForIot();
