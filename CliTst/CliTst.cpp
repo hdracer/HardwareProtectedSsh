@@ -23,71 +23,6 @@ extern void DllInit();
 // Web API/REST client calls
 //
 
-// In case of any failure to fetch data from a service,
-// create a json object with "error" key and value containing the exception details.
-pplx::task<json::value> handle_exception(pplx::task<json::value>& t, const utility::string_t& field_name)
-{
-    try
-    {
-        t.get();
-    }
-    catch (const std::exception& ex)
-    {
-        json::value error_json = json::value::object();
-        error_json[field_name] = json::value::object();
-        error_json[field_name][U("error")] = json::value::string(utility::conversions::to_string_t(ex.what()));
-        return pplx::task_from_result<json::value>(error_json);
-    }
-
-    return t;
-}
-
-//
-// Check the Attestation Server whitelist for the specified TPM key hash
-//
-pplx::task<json::value> RestTpmKeyHashLookup(char *szKeyHashArg)
-{
-    uri_builder ub;
-    ub.set_host(U("strongnetsvc.jwsecure.com"));
-    ub.set_path(U("/bhtmvc/api/MbkAttestation/"));
-    ub.append_query(U("publicKeyHash"), szKeyHashArg);
-    ub.set_scheme(U("https"));
-    auto mbk_url = ub.to_string();
-
-    http_client mbk_client(mbk_url);
-    http_request request(methods::GET);
-    request.headers().set_content_type(U("application/json"));
-    return mbk_client.request(request).then([](http_response resp)
-    {
-        return resp.extract_json();
-    }).then([](json::value mbk_json)
-    {
-        json::value att_result_node = json::value::object();
-
-        if (false == mbk_json.is_null() &&
-            false == mbk_json[U("AttAttempt")].is_null())
-        {
-            att_result_node = mbk_json[U("AttAttempt")];
-            bool isVerified = att_result_node[U("Verified")].as_bool();
-            if (true == isVerified)
-                printf("Key is valid.\n");
-            else
-                printf("Key is invalid.\n");
-        }
-        else
-        {
-            // Event data is null, we hit an error.
-            att_result_node[U("MbkAttestation")] = json::value::object();
-            att_result_node[U("error")] = mbk_json[U("description")];
-        }
-
-        return att_result_node;
-    }).then([=](pplx::task<json::value> t)
-    {
-        return handle_exception(t, U("MbkAttestation"));
-    });
-}
-
 //
 // Request an AIK challenge from the Attestation Server 
 //
@@ -126,15 +61,17 @@ bool RestGetActivation(
     // Send the request and wait
     //
 
-    http_response resp = mbk_client.request(request).wait();
-    json::value challenge_result = resp.extract_json().wait();
+    http_response resp = mbk_client.request(request).get();
+    if (status_codes::Created != resp.status_code())
+        return false;
+    json::value challenge_result = resp.extract_json().get();
 
     //
     // Decode and return the response
     //
 
     if (false == challenge_result.is_null() &&
-        false == challenge_result[U("Challenge")].is_null())
+        false == challenge_result[U("Id")].is_null())
     {
         activationData.CredentialBlob = utility::conversions::from_base64(
             challenge_result[U("ChallengeCredential")].as_string());
@@ -193,8 +130,10 @@ bool RestRegisterKey(
     // Send the request and wait
     //
 
-    http_response resp = mbk_client.request(request).wait();
-    json::value reg_result = resp.extract_json().wait();
+    http_response resp = mbk_client.request(request).get();
+    if (status_codes::Created != resp.status_code())
+        return false;
+    json::value reg_result = resp.extract_json().get();
 
     //
     // Decode the response
@@ -207,6 +146,41 @@ bool RestRegisterKey(
     }
 
     return false;
+}
+
+//
+// Determine whether the specified public key is trusted/certified
+//
+bool RestLookupRegisteredKey(
+    TPMT_PUBLIC &clientPub)
+{
+    uri_builder ub;
+
+    //
+    // Build the URI
+    //
+
+    ub.set_host(U("strongnetsvc.jwsecure.com"));
+    ub.set_path(U("/bhtmvc/api/LinuxCertifiedKey/"));
+    ub.append_query(
+        U("publicKeyHash"), 
+        utility::conversions::to_base64(clientPub.GetName()));
+    ub.set_scheme(U("https"));
+    auto mbk_url = ub.to_string();
+
+    http_client mbk_client(mbk_url);
+    http_request request(methods::GET);
+    request.headers().set_content_type(U("application/json"));
+
+    //
+    // Send the request and wait
+    //
+
+    http_response resp = mbk_client.request(request).get();
+    if (status_codes::OK != resp.status_code())
+        return false;
+
+    return true;
 }
 
 //
@@ -448,136 +422,9 @@ void ShowTpmCapabilities(_TPMCPP Tpm2 &tpm)
 }
 
 //
-// Simulated server call that returns a Nonce
+// Simulated recipient call that checks message integrity
 //
-ByteVec ServerGetNonce()
-{
-    ByteVec nonce = CryptoServices::GetRand(16);
-    cout << "Server: Nonce is " << nonce << endl;
-    return nonce;
-}
-
-//
-// Simulate server call that challenges the linkage between an Endorsement Key
-// and another key stored on the same TPM.
-//
-ActivationData ServerGetActivation(
-    TPMT_PUBLIC &clientEkPub, 
-    ByteVec &nameOfKeyToActivate)
-{
-    //
-    // Lookup the client EK public in a whitelist (or, similarly, find its 
-    // certificate and build trust off that). Either way, this is a critical
-    // step, since the EK is the root of trust for the whole protocol, and is 
-    // used to prove that child keys are truly TPM-protected.
-    //
-    // For an example of pulling EK manufacturer certificates from the 
-    // internet, see:
-    // https://github.com/01org/tpm2.0-tools/blob/master/src/tpm2_getmanufec.cpp
-    //
-
-    cout << "Server: assume Endorsement Key is trusted: " << clientEkPub.GetName() << endl;
-
-    //
-    // Create a random secret and encrypt it back to the client. If the client
-    // can decrypt it, the server can trust that the "activated" key is on the
-    // same TPM as the EK.
-    //
-    // A production server should ideally store each secret, associated with 
-    // the EK pub to which it was encrypted. That way, if the secret is used 
-    // for some downstream purpose (such as a public cloud API key), and gets 
-    // stolen (the secret is exportable; the EK is not), that situation can 
-    // be detected.
-    //
-
-    ByteVec secret = CryptoServices::GetRand(16);
-    cout << "Server: secret is: " << secret << endl;
-    cout << "Server: creating activation challenge for this key: " << nameOfKeyToActivate << endl;
-    return clientEkPub.CreateActivation(
-        secret,
-        TPM_FOR_IOT_HASH_ALG,
-        nameOfKeyToActivate);
-}
-
-void ServerRegisterKey(
-    ByteVec &serverSecret, 
-    TPMT_PUBLIC &clientRestrictedPub,
-    PCR_ReadResponse &clientPcrVals,
-    QuoteResponse &clientPcrQuote, 
-    TPMS_CREATION_DATA &clientKeyCreation,
-    CertifyCreationResponse &clientKeyQuote)
-{
-    //
-    // Confirm that the provided PCR hash is as expected for this particular 
-    // client device. On Windows, an attested boot log can be used instead. On 
-    // Linux, this procedure requires whitelisting.
-    //
-
-    TPMS_ATTEST qAttest = clientPcrQuote.quoted;
-    TPMS_QUOTE_INFO *qInfo = dynamic_cast<TPMS_QUOTE_INFO *> (qAttest.attested);
-    cout << "Server: assume quoted PCR is correct: " << qInfo->pcrDigest << endl;
-
-    //
-    // Confirm that the client restricted public is the same key that the 
-    // server activated in the previous call
-    //
-
-    cout << "Server: assume restricted key matches previous activation: " << clientRestrictedPub.GetName() << endl;
-
-    //
-    // Check the PCR quote signature
-    //
-
-    bool sigOk = clientRestrictedPub.ValidateQuote(
-        clientPcrVals, serverSecret, clientPcrQuote);
-    if (sigOk) {
-        cout << "Server: PCR quote is valid" << endl;
-    }
-    else {
-        cout << "Server: PCR quote is invalid" << endl;
-        exit(1);
-    }
-
-    //
-    // For the new child key, hash the creation data
-    //
-
-    ByteVec creationHash = TPMT_HA::FromHashOfData(
-        TPM_FOR_IOT_HASH_ALG, clientKeyCreation.ToBuf()).digest;
-
-    //
-    // Check the PCR binding
-    //
-
-    if (clientKeyCreation.pcrDigest == qInfo->pcrDigest) {
-        cout << "Server: PCR digest for new key is correct" << endl;
-    }
-    else {
-        cout << "Server: PCR digest for new key is incorrect" << endl;
-        exit(1);
-    }
-
-    // 
-    // Check the key quote signature
-    //
-
-    sigOk = clientRestrictedPub.ValidateCertifyCreation(
-        serverSecret,
-        creationHash,
-        clientKeyQuote);
-
-    TPMS_ATTEST cAttest = clientKeyQuote.certifyInfo;
-    TPMS_CREATION_INFO *cInfo = dynamic_cast<TPMS_CREATION_INFO *> (cAttest.attested);
-    if (sigOk) {
-        cout << "Server: quote is valid for this key: " << cInfo->objectName << endl;
-    }
-    else {
-        cout << "Server: key creation certification/quote is invalid" << endl;
-        exit(1);
-    }
-}
-
-void ServerReceiveMessage(
+bool ServerReceiveMessage(
     TPMT_PUBLIC &clientSigningPub,
     const std::string &clientMessage,
     TPMU_SIGNATURE &messageSig)
@@ -587,7 +434,8 @@ void ServerReceiveMessage(
     // previous server call
     //
 
-    cout << "Server: assume previous registration of this key: " << clientSigningPub.GetName() << endl;
+    if (false == RestLookupRegisteredKey(clientSigningPub))
+        return false;
 
     //
     // Hash the message
@@ -600,15 +448,9 @@ void ServerReceiveMessage(
     // Check the signature
     //
 
-    bool sigOk = clientSigningPub.ValidateSignature(
-        messageHash, messageSig);
-    if (sigOk) {
-        cout << "Server: message received and verified" << endl;
-    }
-    else {
-        cout << "Server: message signature verification failed" << endl;
-        exit(1);
-    }
+    if (false == clientSigningPub.ValidateSignature(
+            messageHash, messageSig))
+        return false;
 
     //
     // Process the message, as appropriate for the host app, based on whether 
@@ -616,6 +458,7 @@ void ServerReceiveMessage(
     //
 
     // TODO
+    return true;
 }
 
 //
@@ -661,16 +504,17 @@ void AttestationForIot()
     // List certain TPM capabilities for lab testing
     //
 
-    ShowTpmCapabilities(tpm);
+    //ShowTpmCapabilities(tpm);
 
     //
     // Read out the manufacturer Endorsement Key (EK)
     //
 
-    cout << "Client: open a handle to the TPM Endorsement Key (EK)..." << endl;
+    cout << "Client: open a handle to the TPM Endorsement Key (EK): ";
     TPM_HANDLE ekHandle = MakeEndorsementKey(tpm);
     auto ekPubX = tpm.ReadPublic(ekHandle);
     TPMT_PUBLIC& ekPub = ekPubX.outPublic;
+    cout << CryptoServices::Hash(TPM_ALG_ID::SHA256, ekPub.ToBuf()) << endl;
 
     //
     // Create a restricted key in the storage hierarchy
@@ -678,6 +522,7 @@ void AttestationForIot()
 
     cout << "Client: open a handle to the TPM Storage Root Key (SRK)..." << endl;
     TPM_HANDLE primaryKey = MakeStoragePrimary(tpm);
+
     cout << "Client: create a restricted key: ";
     TPM_HANDLE restrictedKey = MakeChildSigningKey(tpm, primaryKey, true);
     auto restrictedPubX = tpm.ReadPublic(restrictedKey);
@@ -685,11 +530,18 @@ void AttestationForIot()
     cout << restrictedPub.GetName() << endl;
 
     //
+    // For an example of pulling EK manufacturer certificates from the 
+    // internet, see:
+    // https://github.com/01org/tpm2.0-tools/blob/master/src/tpm2_getmanufec.cpp
+    //
+
+    // TODO
+
+    //
     // Request activation to prove linkage between restricted key and EK 
     //
 
     ByteVec nameOfKeyToActivate = restrictedKey.GetName();
-    //ActivationData encryptedSecret = ServerGetActivation(ekPub, nameOfKeyToActivate);
     ActivationData encryptedSecret;
     if (false == RestGetActivation(
         ekPub,
@@ -786,14 +638,6 @@ void AttestationForIot()
     // Send the PCR quote and key certification to the server
     //
 
-    /*
-    ServerRegisterKey(
-        decryptedSecret,
-        restrictedPub,
-        pcrVals,
-        quote,
-        newSigningKey.creationData,
-        createQuote);*/
     if (false == RestRegisterKey(
         restrictedPub,
         pcrVals,
@@ -824,10 +668,16 @@ void AttestationForIot()
     // Send the signed message to the server
     //
 
-    ServerReceiveMessage(
+    if (false == ServerReceiveMessage(
         userSigningPub,
         clientMessage,
-        *signature.signature);
+        *signature.signature))
+    {
+        cout << "Server: message verification failed" << endl;
+        return;
+    }
+
+    cout << "Server: signer and message verification succeeded" << endl;
 
     //
     // Save the message signing key to be reused until the PCR(s) change(s)
@@ -853,16 +703,8 @@ int main(int argc, char *argv[])
 DllInit();
 try {
 #endif
-    
-    if (2 == argc) {
-        /*std::vector<pplx::task<json::value>> tasks;
-        tasks.push_back(RestTpmKeyHashLookup(argv[1]));
-        pplx::when_all(tasks.begin(), tasks.end()).wait();*/
-        RestTpmKeyHashLookup(argv[1]).wait();
-    }
-    else {
-        AttestationForIot();
-    }
+
+    AttestationForIot();
 
 #ifdef __linux__
 }
