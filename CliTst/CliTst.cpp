@@ -1,697 +1,77 @@
+/* Copyright (C) 2016 JW Secure, Inc. - All Rights Reserved
+*  You may use, distribute and modify this code under the terms of the GPLv3 
+*  license: https://www.gnu.org/licenses/gpl-3.0-standalone.html. 
+*  This program comes with ABSOLUTELY NO WARRANTY.
+*/
+
 #include "stdafx.h"
-
-using namespace TpmCpp;
-
-using namespace utility;
-using namespace concurrency;
-using namespace concurrency::streams;
-
-using namespace web;
-using namespace web::http;
-using namespace web::http::client;
-using namespace web::http::experimental;
-using namespace web::http::experimental::listener;
-
-#define TPM_FOR_IOT_HASH_ALG TPM_ALG_ID::SHA1
-
-//
-// Non-WIN32 initialization for TSS.CPP.
-//
-extern void DllInit();
-
-//
-// Web API/REST client calls
-//
-
-//
-// Request an AIK challenge from the Attestation Server 
-//
-bool RestGetActivation(
-    TPMT_PUBLIC &clientEkPub,
-    TPMT_PUBLIC &clientRestrictedPub,
-    ActivationData &activationData)
-{
-    uri_builder ub;
-
-    //
-    // Build the URI
-    //
-
-    ub.set_host(U("strongnetsvc.jwsecure.com"));
-    ub.set_path(U("/bhtmvc/api/LinuxActivation/"));
-    ub.set_scheme(U("https"));
-    auto mbk_url = ub.to_string();
-
-    http_client mbk_client(mbk_url);
-    http_request request(methods::POST);
-    request.headers().set_content_type(U("application/json"));
-
-    //
-    // Populate the request
-    //
-
-    json::value activation_req_node = json::value::object();
-    activation_req_node[U("EkPublic")] = web::json::value::string(
-        utility::conversions::to_base64(clientEkPub.ToBuf()));
-    activation_req_node[U("AikPublic")] = web::json::value::string(
-        utility::conversions::to_base64(clientRestrictedPub.ToBuf()));
-    request.set_body(activation_req_node);
-
-    //
-    // Send the request and wait
-    //
-
-    http_response resp = mbk_client.request(request).get();
-    if (status_codes::Created != resp.status_code())
-        return false;
-    json::value challenge_result = resp.extract_json().get();
-
-    //
-    // Decode and return the response
-    //
-
-    if (false == challenge_result.is_null() &&
-        false == challenge_result[U("Id")].is_null())
-    {
-        activationData.CredentialBlob = utility::conversions::from_base64(
-            challenge_result[U("ChallengeCredential")].as_string());
-        activationData.Secret = utility::conversions::from_base64(
-            challenge_result[U("ChallengeSecret")].as_string());
-
-        return true;
-    }
-
-    return false;
-}
-
-//
-// Validate platform attestation and key certification with the Attestation Server 
-//
-bool RestRegisterKey(
-    TPMT_PUBLIC &clientRestrictedPub,
-    PCR_ReadResponse &clientPcrVals,
-    QuoteResponse &clientPcrQuote,
-    TPMS_CREATION_DATA &clientKeyCreation,
-    CertifyCreationResponse &clientKeyQuote)
-{
-    uri_builder ub;
-
-    //
-    // Build the URI
-    //
-
-    ub.set_host(U("strongnetsvc.jwsecure.com"));
-    ub.set_path(U("/bhtmvc/api/LinuxCertifiedKey/"));
-    ub.set_scheme(U("https"));
-    auto mbk_url = ub.to_string();
-
-    http_client mbk_client(mbk_url);
-    http_request request(methods::POST);
-    request.headers().set_content_type(U("application/json"));
-
-    //
-    // Populate the request
-    //
-
-    json::value reg_req_node = json::value::object();
-    reg_req_node[U("AikPublic")] = web::json::value::string(
-        utility::conversions::to_base64(clientRestrictedPub.ToBuf()));
-    reg_req_node[U("Pcrs")] = web::json::value::string(
-        utility::conversions::to_base64(clientPcrVals.ToBuf()));
-    reg_req_node[U("PcrQuote")] = web::json::value::string(
-        utility::conversions::to_base64(clientPcrQuote.ToBuf()));
-    reg_req_node[U("KeyCreationData")] = web::json::value::string(
-        utility::conversions::to_base64(clientKeyCreation.ToBuf()));
-    reg_req_node[U("KeyQuote")] = web::json::value::string(
-        utility::conversions::to_base64(clientKeyQuote.ToBuf()));
-    request.set_body(reg_req_node);
-
-    //
-    // Send the request and wait
-    //
-
-    http_response resp = mbk_client.request(request).get();
-    if (status_codes::Created != resp.status_code())
-        return false;
-    json::value reg_result = resp.extract_json().get();
-
-    //
-    // Decode the response
-    //
-
-    if (false == reg_result.is_null() &&
-        false == reg_result[U("Id")].is_null())
-    {
-        return true;
-    }
-
-    return false;
-}
-
-//
-// Determine whether the specified public key is trusted/certified
-//
-bool RestLookupRegisteredKey(
-    TPMT_PUBLIC &clientPub)
-{
-    uri_builder ub;
-
-    //
-    // Build the URI
-    //
-
-    ub.set_host(U("strongnetsvc.jwsecure.com"));
-    ub.set_path(U("/bhtmvc/api/LinuxCertifiedKey/"));
-    ub.append_query(
-        U("publicKeyHash"), 
-        utility::conversions::to_base64(clientPub.GetName()));
-    ub.set_scheme(U("https"));
-    auto mbk_url = ub.to_string();
-
-    http_client mbk_client(mbk_url);
-    http_request request(methods::GET);
-    request.headers().set_content_type(U("application/json"));
-
-    //
-    // Send the request and wait
-    //
-
-    http_response resp = mbk_client.request(request).get();
-    if (status_codes::OK != resp.status_code())
-        return false;
-
-    return true;
-}
-
-//
-// Open the Endorsement Key
-//
-TPM_HANDLE MakeEndorsementKey(_TPMCPP Tpm2 &tpm)
-{
-    vector<BYTE> NullVec;
-    TPMT_PUBLIC storagePrimaryTemplate(TPM_FOR_IOT_HASH_ALG,
-        TPMA_OBJECT::decrypt | TPMA_OBJECT::restricted |
-        TPMA_OBJECT::fixedParent | TPMA_OBJECT::fixedTPM |
-        TPMA_OBJECT::sensitiveDataOrigin | TPMA_OBJECT::userWithAuth,
-        NullVec,           // No policy
-        TPMS_RSA_PARMS(    // How child keys should be protected
-            TPMT_SYM_DEF_OBJECT(TPM_ALG_ID::AES, 128, TPM_ALG_ID::CFB),
-            TPMS_NULL_ASYM_SCHEME(), 2048, 65537),
-        TPM2B_PUBLIC_KEY_RSA(NullVec));
-
-    // Create the key
-    CreatePrimaryResponse ek = tpm.CreatePrimary(
-        tpm._AdminEndorsement,
-        TPMS_SENSITIVE_CREATE(NullVec, NullVec), 
-        storagePrimaryTemplate,
-        NullVec, 
-        vector<TPMS_PCR_SELECTION>());
-
-    return ek.objectHandle;
-}
-
-//
-// Open the Storage Root Key
-//
-TPM_HANDLE MakeStoragePrimary(_TPMCPP Tpm2 &tpm)
-{
-    vector<BYTE> NullVec;
-    TPMT_PUBLIC storagePrimaryTemplate(
-        TPM_FOR_IOT_HASH_ALG,
-        TPMA_OBJECT::decrypt | TPMA_OBJECT::restricted |
-        TPMA_OBJECT::fixedParent | TPMA_OBJECT::fixedTPM |
-        TPMA_OBJECT::sensitiveDataOrigin | TPMA_OBJECT::userWithAuth,
-        NullVec,           // No policy
-        TPMS_RSA_PARMS(    // How child keys should be protected
-            TPMT_SYM_DEF_OBJECT(TPM_ALG_ID::AES, 128, TPM_ALG_ID::CFB),
-            TPMS_NULL_ASYM_SCHEME(), 2048, 65537),
-        TPM2B_PUBLIC_KEY_RSA(NullVec));
-
-    // Create the key
-    CreatePrimaryResponse storagePrimary = tpm.CreatePrimary(
-        tpm._AdminOwner,
-        TPMS_SENSITIVE_CREATE(NullVec, NullVec), 
-        storagePrimaryTemplate,
-        NullVec, 
-        vector<TPMS_PCR_SELECTION>());
-
-    return storagePrimary.objectHandle;
-}
-
-//
-// Create an RSA signing key, optionally restricted (i.e., an AIK)
-//
-TPM_HANDLE MakeChildSigningKey(
-    _TPMCPP Tpm2 &tpm, 
-    TPM_HANDLE parentHandle, 
-    bool restricted)
-{
-    vector<BYTE> NullVec;
-    TPMA_OBJECT restrictedAttribute;
-
-    if (restricted) {
-        restrictedAttribute = TPMA_OBJECT::restricted;
-    }
-
-    TPMT_PUBLIC templ(
-        TPM_FOR_IOT_HASH_ALG,
-        TPMA_OBJECT::sign | TPMA_OBJECT::fixedParent |
-        TPMA_OBJECT::fixedTPM | TPMA_OBJECT::sensitiveDataOrigin |
-        TPMA_OBJECT::userWithAuth | restrictedAttribute,
-        NullVec,  // No policy
-        TPMS_RSA_PARMS(
-            TPMT_SYM_DEF_OBJECT(TPM_ALG_ID::_NULL, 0, TPM_ALG_ID::_NULL),
-            TPMS_SCHEME_RSASSA(TPM_FOR_IOT_HASH_ALG), 2048, 65537), // PKCS1.5
-        TPM2B_PUBLIC_KEY_RSA(NullVec));
-
-    CreateResponse newSigningKey = tpm.Create(
-        parentHandle,
-        TPMS_SENSITIVE_CREATE(),
-        templ,
-        NullVec,
-        vector<TPMS_PCR_SELECTION>());
-
-    auto signKey = tpm.Load(parentHandle, newSigningKey.outPrivate, newSigningKey.outPublic);
-    return signKey;
-}
-
-//
-// Assume that TPM ownership has been taken and that auth values are
-// non-null.
-//
-void SetPlatformAuthenticationValues(_TPMCPP Tpm2 &tpm)
-{
-#ifndef __linux__
-    WCHAR wszAuthReg[1024] = { 0 };
-    UINT32 cbAuthReg = sizeof(wszAuthReg);
-    BYTE rgbAuthValue[1024] = { 0 };
-    UINT32 cbAuthValue = sizeof(rgbAuthValue);
-
-    //
-    // Endorsement
-    //
-
-    if (RegGetValueW(
-        HKEY_LOCAL_MACHINE,
-        L"SYSTEM\\CurrentControlSet\\Services\\TPM\\WMI\\Endorsement",
-        L"EndorsementAuth",
-        RRF_RT_REG_SZ,
-        NULL,
-        wszAuthReg,
-        (DWORD*)&cbAuthReg) == ERROR_SUCCESS)
-    {
-        if (TRUE == CryptStringToBinaryW(
-            wszAuthReg,
-            0,
-            CRYPT_STRING_BASE64,
-            rgbAuthValue,
-            (DWORD*)&cbAuthValue,
-            NULL,
-            NULL))
-        {
-            vector<BYTE> newAuth(rgbAuthValue, rgbAuthValue + cbAuthValue);
-            tpm._AdminEndorsement.SetAuth(newAuth);
-        }
-    }
-
-    //
-    // Storage
-    //
-
-    cbAuthReg = sizeof(wszAuthReg);
-    cbAuthValue = sizeof(rgbAuthValue);
-    if (RegGetValueW(
-        HKEY_LOCAL_MACHINE,
-        L"SYSTEM\\CurrentControlSet\\Services\\TPM\\WMI\\Admin",
-        L"StorageOwnerAuth",
-        RRF_RT_REG_SZ,
-        NULL,
-        wszAuthReg,
-        (DWORD*)&cbAuthReg) == ERROR_SUCCESS)
-    {
-        if (TRUE == CryptStringToBinaryW(
-            wszAuthReg,
-            0,
-            CRYPT_STRING_BASE64,
-            rgbAuthValue,
-            (DWORD*)&cbAuthValue,
-            NULL,
-            NULL))
-        {
-            vector<BYTE> newAuth(rgbAuthValue, rgbAuthValue + cbAuthValue);
-            tpm._AdminOwner.SetAuth(newAuth);
-        }
-    }
-    
-#else
-    //
-    // Linux
-    //
-
-    vector<BYTE> newAuth{ '1', '2', '3', '4' };
-    tpm._AdminOwner.SetAuth(newAuth);
-    tpm._AdminEndorsement.SetAuth(newAuth);
-#endif
-}
-
-void ShowTpmCapabilities(_TPMCPP Tpm2 &tpm)
-{
-    UINT32 startVal = 0;
- 
-    //
-    // Manufacturer information
-    // See also https://github.com/ms-iot/security/blob/master/Urchin/T2T/T2T.cpp
-    //
-
-    do {
-        GetCapabilityResponse caps = tpm.GetCapability(TPM_CAP::TPM_PROPERTIES, startVal, 8);
-        TPML_TAGGED_TPM_PROPERTY *props = dynamic_cast<TPML_TAGGED_TPM_PROPERTY *> (caps.capabilityData);
-
-        // Print name and value
-        for (auto p = props->tpmProperty.begin(); p != props->tpmProperty.end(); p++) {
-            char *pCharValue = (char *)&p->value;
-            cout << Tpm2::GetEnumString(p->property) << ": ";
-            switch (p->property)
-            {
-            case TPM_PT::FAMILY_INDICATOR:
-            case TPM_PT::MANUFACTURER:
-            case TPM_PT::VENDOR_STRING_1:
-            case TPM_PT::VENDOR_STRING_2:
-            case TPM_PT::VENDOR_STRING_3:
-            case TPM_PT::VENDOR_STRING_4:
-                cout << pCharValue[3] << pCharValue[2] << pCharValue[1] << pCharValue[0];
-                break;
-            default:
-                cout << p->value;
-                break;
-            }
-            cout << endl;
-        }
-
-        if (!caps.moreData) {
-            break;
-        }
-
-        startVal = ((UINT32)props->tpmProperty[props->tpmProperty.size() - 1].property) + 1;
-    } while (true);
-    cout << endl;
-
-    //
-    // Cryptographic capabilities
-    //
-
-    cout << "Algorithms:" << endl;
-    startVal = 0;
-    do {
-        GetCapabilityResponse caps = tpm.GetCapability(TPM_CAP::ALGS, startVal, 8);
-        TPML_ALG_PROPERTY *props = dynamic_cast<TPML_ALG_PROPERTY *> (caps.capabilityData);
-
-        // Print alg name and properties
-        for (auto p = props->algProperties.begin(); p != props->algProperties.end(); p++) {
-            cout << setw(16) << Tpm2::GetEnumString(p->alg) <<
-                ": " << Tpm2::GetEnumString(p->algProperties) << endl;
-        }
-
-        if (!caps.moreData) {
-            break;
-        }
-
-        startVal = ((UINT32)props->algProperties[props->algProperties.size() - 1].alg) + 1;
-    } while (true);
-    cout << endl;
-}
-
-//
-// Simulated recipient call that checks message integrity
-//
-bool ServerReceiveMessage(
-    TPMT_PUBLIC &clientSigningPub,
-    const std::string &clientMessage,
-    TPMU_SIGNATURE &messageSig)
-{
-    //
-    // Confirm that the client signing key is the one registered in the 
-    // previous server call
-    //
-
-    if (false == RestLookupRegisteredKey(clientSigningPub))
-        return false;
-
-    //
-    // Hash the message
-    //
-
-    ByteVec messageHash = TPMT_HA::FromHashOfString(
-        TPM_FOR_IOT_HASH_ALG, clientMessage).digest;
-
-    //
-    // Check the signature
-    //
-
-    if (false == clientSigningPub.ValidateSignature(
-            messageHash, messageSig))
-        return false;
-
-    //
-    // Process the message, as appropriate for the host app, based on whether 
-    // the signature is valid and from a trusted device
-    //
-
-    // TODO
-    return true;
-}
+#include "attestationlib.h"
 
 //
 // PCR attestation and AIK activation
 //
-void AttestationForIot()
+void TestPlatformAttestation()
 {
-    Tpm2 tpm;
-    vector<BYTE> NullVec;
-
-    // 
-    // Tell the TPM2 object where to send commands 
-    //
-
-#ifdef __linux__
-    //
-    // Connect to the Intel TSS resource manager
-    //
-
-    TpmTcpDevice tcpDevice;
-    if (!tcpDevice.Connect("127.0.0.1", 2323)) {
-        cerr << "Could not connect to the resource manager";
-        return;
-    }
-    tpm._SetDevice(tcpDevice);
-#else
-    //
-    // Connect to the TBS
-    //
-
-    TpmTbsDevice tbsDevice;
-    tbsDevice.Connect();
-    tpm._SetDevice(tbsDevice);
-#endif
+    CAttestationLib attestationLib;
 
     //
-    // Set platform auth values
+    // Initialize attestation helper class
     //
 
-    SetPlatformAuthenticationValues(tpm);
+    cout << "Initializing test of remote platform attestation using local host TPM 2.0 device..." << endl;
+    attestationLib.Initialize(std::string("https://strongnetsvc.jwsecure.com"));
 
     //
     // List certain TPM capabilities for lab testing
     //
 
-    //ShowTpmCapabilities(tpm);
+    //attestationLib.ShowTpmCapabilities();
 
     //
-    // Read out the manufacturer Endorsement Key (EK)
+    // Establish an AIK
     //
 
-    cout << "Client: open a handle to the TPM Endorsement Key (EK): ";
-    TPM_HANDLE ekHandle = MakeEndorsementKey(tpm);
-    auto ekPubX = tpm.ReadPublic(ekHandle);
-    TPMT_PUBLIC& ekPub = ekPubX.outPublic;
-    cout << CryptoServices::Hash(TPM_ALG_ID::SHA256, ekPub.ToBuf()) << endl;
-
-    //
-    // Create a restricted key in the storage hierarchy
-    //
-
-    cout << "Client: open a handle to the TPM Storage Root Key (SRK)..." << endl;
-    TPM_HANDLE primaryKey = MakeStoragePrimary(tpm);
-
-    cout << "Client: create a restricted key: ";
-    TPM_HANDLE restrictedKey = MakeChildSigningKey(tpm, primaryKey, true);
-    auto restrictedPubX = tpm.ReadPublic(restrictedKey);
-    TPMT_PUBLIC& restrictedPub = restrictedPubX.outPublic;
-    cout << restrictedPub.GetName() << endl;
-
-    //
-    // For an example of pulling EK manufacturer certificates from the 
-    // internet, see:
-    // https://github.com/01org/tpm2.0-tools/blob/master/src/tpm2_getmanufec.cpp
-    //
-
-    // TODO
-
-    //
-    // Request activation to prove linkage between restricted key and EK 
-    //
-
-    ByteVec nameOfKeyToActivate = restrictedKey.GetName();
-    ActivationData encryptedSecret;
-    if (false == RestGetActivation(
-        ekPub,
-        restrictedPub,
-        encryptedSecret))
+    if (false == attestationLib.CreateAttestationIdentityKey())
     {
-        cout << "Server: RestGetActivation failed" << endl;
+        cout << "Failed to create an Attestation Identity Key" << endl;
+        cout << "Confirm that this Endorsement Key hash is trusted by the Attestation Server: " << endl;
+        cout << " " << attestationLib.GetEkPubHash() << endl;
         return;
     }
+    cout << "Successfully established an Attestation Identity Key with the Attestation Server" << endl;
 
     //
-    // Activation data can only be decrypted on this TPM
+    // Create a sealed user key
     //
 
-    ByteVec decryptedSecret = tpm.ActivateCredential(
-        restrictedKey, 
-        ekHandle, 
-        encryptedSecret.CredentialBlob, 
-        encryptedSecret.Secret);
-    cout << "Client: decrypted secret: " << decryptedSecret << endl;
-
-    //
-    // Optionally, save the AIK, since it can be reused across reboots
-    //
-
-    // TODO
-
-    //
-    // Read PCR data
-    //
-
-    auto pcrsToQuote = TPMS_PCR_SELECTION::GetSelectionArray(TPM_FOR_IOT_HASH_ALG, 7);
-    PCR_ReadResponse pcrVals = tpm.PCR_Read(pcrsToQuote);
-
-    //
-    // Sign the PCR hash with the AIK
-    //
-
-    QuoteResponse quote = tpm.Quote(
-        restrictedKey, decryptedSecret, TPMS_NULL_SIG_SCHEME(), pcrsToQuote);
-
-    //
-    // Create a user signing-only key in the storage hierarchy. 
-    //
-
-    TPMT_PUBLIC templ(TPM_FOR_IOT_HASH_ALG,
-        TPMA_OBJECT::sign |           // Key attributes
-        TPMA_OBJECT::fixedParent |
-        TPMA_OBJECT::fixedTPM |
-        TPMA_OBJECT::sensitiveDataOrigin |
-        TPMA_OBJECT::userWithAuth,
-        NullVec,                      // No policy
-        TPMS_RSA_PARMS(
-            TPMT_SYM_DEF_OBJECT(TPM_ALG_ID::_NULL, 0, TPM_ALG_ID::_NULL),
-            TPMS_SCHEME_RSASSA(TPM_FOR_IOT_HASH_ALG), 2048, 65537),
-        TPM2B_PUBLIC_KEY_RSA(NullVec));
-
-    //
-    // Include the same PCR selection as above
-    //
-
-    cout << "Client: create a general purpose signing key on the TPM..." << endl;
-    CreateResponse newSigningKey = tpm.Create(
-        primaryKey,
-        TPMS_SENSITIVE_CREATE(NullVec, NullVec),
-        templ,
-        NullVec,
-        pcrsToQuote);
-
-    //
-    // Load the new key
-    //
-
-    TPM_HANDLE keyToCertify = tpm.Load(
-        primaryKey,
-        newSigningKey.outPrivate,
-        newSigningKey.outPublic);
-    auto userSigningPubX = tpm.ReadPublic(keyToCertify);
-    TPMT_PUBLIC &userSigningPub = userSigningPubX.outPublic;
-
-    //
-    // Certify the creation of the user key using the AIK
-    //
-
-    CertifyCreationResponse createQuote = tpm.CertifyCreation(
-        restrictedKey,
-        keyToCertify,
-        decryptedSecret,
-        newSigningKey.creationHash,
-        TPMS_NULL_SIG_SCHEME(),
-        newSigningKey.creationTicket);
-
-    //
-    // Send the PCR quote and key certification to the server
-    //
-
-    if (false == RestRegisterKey(
-        restrictedPub,
-        pcrVals,
-        quote,
-        newSigningKey.creationData,
-        createQuote))
+    if (false == attestationLib.CreateSealedUserKey())
     {
-        cout << "Server: RestRegisterKey failed" << endl;
+        cout << "Failed to create a sealed TPM user key" << endl;
         return;
     }
+    cout << "Successfully created a sealed user key" << endl;
 
     //
-    // Sign a message with the user key
+    // Check the user key with the AS
     //
 
-    std::string clientMessage("some message or telemetry data");
-    ByteVec messageHash = TPMT_HA::FromHashOfString(
-        TPM_FOR_IOT_HASH_ALG, clientMessage).digest;
-    auto signature = tpm.Sign(
-        keyToCertify,
-        messageHash,
-        TPMS_NULL_SIG_SCHEME(),
-        TPMT_TK_HASHCHECK::NullTicket());
-
-    cout << "Client: message hash: " << messageHash << endl;
-
-    //
-    // Send the signed message to the server
-    //
-
-    if (false == ServerReceiveMessage(
-        userSigningPub,
-        clientMessage,
-        *signature.signature))
+    if (false == attestationLib.CheckUserKeyWhitelist())
     {
-        cout << "Server: message verification failed" << endl;
+        cout << "Failed to verify TPM user key with the Attestation Server whitelist" << endl;
         return;
     }
-
-    cout << "Server: signer and message verification succeeded" << endl;
+    cout << "Successfully checked TPM user key with Attestation Server whitelist" << endl;
 
     //
-    // Save the message signing key to be reused until the PCR(s) change(s)
+    // Sign and verify
     //
 
-    // TODO
-    
-    //
-    // Close handles 
-    //
-
-    tpm.FlushContext(keyToCertify);
-    tpm.FlushContext(primaryKey);
-    tpm.FlushContext(restrictedKey);
+    if (false == attestationLib.SignAndVerifyMessage(std::string("This is a test message")))
+    {
+        cout << "Failed to sign and verify a message with the TPM user key" << endl;
+        return;
+    }
+    cout << "Successfully signed and verified and message with the TPM user key " << endl;
 }
 
 //
@@ -704,12 +84,12 @@ DllInit();
 try {
 #endif
 
-    AttestationForIot();
+    TestPlatformAttestation();
 
 #ifdef __linux__
 }
 catch (const runtime_error& exc) {
-    cerr << "TpmForIotTst: " << exc.what() << "\nExiting...\n";
+    cerr << "CliTst: " << exc.what() << "\nExiting...\n";
 }
 #endif
 

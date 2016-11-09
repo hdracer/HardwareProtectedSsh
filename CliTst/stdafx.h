@@ -14,7 +14,6 @@
 #include "targetver.h"
 
 #ifndef __linux__
-// Windows stuff
 #define WIN32_LEAN_AND_MEAN       
 #include <crtdbg.h>
 #include <windows.h>
@@ -23,7 +22,6 @@
 #include <tchar.h>
 #include <wincrypt.h>
 #else
-// Non-Windows stuff
 #include <arpa/inet.h>
 #include <assert.h>
 #include <string.h>
