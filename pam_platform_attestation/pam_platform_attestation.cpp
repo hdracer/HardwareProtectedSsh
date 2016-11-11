@@ -8,12 +8,13 @@
 #include "pam_platform_attestation.h"
 #include "attestationlib.h"
 
+#define PAM_SM_AUTH
+
 #ifndef __linux__
 #define PAM_EXTERN                  PAM_PLATFORM_ATTESTATION_API
 #define PAM_SUCCESS                 0
 #define PAM_SERVICE_ERR             3
 #define PAM_AUTH_ERR                9
-typedef struct pam_handle pam_handle_t;
 #else
 #include <security/pam_modules.h>
 #include <security/pam_appl.h>
@@ -103,6 +104,18 @@ pam_sm_chauthtok(pam_handle_t *pamh, int flags,
 {
     return (PAM_SERVICE_ERR);
 }
+
+/*
+struct pam_module pam_platform_attestation_modstruct = {
+    "pam_platform_attestation",
+    pam_sm_authenticate,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+};
+*/
 
 #ifdef PAM_MODULE_ENTRY
 PAM_MODULE_ENTRY("pam_platform_attestation");

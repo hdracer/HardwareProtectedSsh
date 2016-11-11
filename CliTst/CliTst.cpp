@@ -6,6 +6,7 @@
 
 #include "stdafx.h"
 #include "attestationlib.h"
+#include "pam_platform_attestation.h"
 
 //
 // PCR attestation and AIK activation
@@ -84,7 +85,10 @@ DllInit();
 try {
 #endif
 
-    TestPlatformAttestation();
+    //TestPlatformAttestation();
+    int pam_result = pam_sm_authenticate(
+        nullptr, 0, 0, nullptr);
+    cout << "pam_sm_authenticate returned: " << pam_result << endl;
 
 #ifdef __linux__
 }

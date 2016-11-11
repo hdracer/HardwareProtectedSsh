@@ -1,0 +1,7 @@
+LIBP11PLATFORMATTESTATION {
+  global:
+	C_*;
+  local:
+	*;
+};
+
