@@ -89,6 +89,7 @@ typedef enum
 {
     P11PA_OPERATION_NONE,
     P11PA_OPERATION_FIND,
+    P11PA_OPERATION_FIND_COMPLETE,
     P11PA_OPERATION_ENCRYPT,
     P11PA_OPERATION_DECRYPT,
     P11PA_OPERATION_DIGEST,
@@ -107,79 +108,7 @@ CK_BBOOL p11pa_session_opened = CK_FALSE;
 CK_ULONG p11pa_session_state = CKS_RO_PUBLIC_SESSION;
 P11PA_OPERATION p11pa_active_operation = P11PA_OPERATION_NONE;
 CK_OBJECT_HANDLE p11pa_find_result = CKR_OBJECT_HANDLE_INVALID;
-
-CK_FUNCTION_LIST p11pa_functions =
-{
-    { 2, 20 },
-    &C_Initialize,
-    &C_Finalize,
-    &C_GetInfo,
-    &C_GetFunctionList,
-    &C_GetSlotList,
-    &C_GetSlotInfo,
-    &C_GetTokenInfo,
-    &C_GetMechanismList,
-    &C_GetMechanismInfo,
-    &C_InitToken,
-    &C_InitPIN,
-    &C_SetPIN,
-    &C_OpenSession,
-    &C_CloseSession,
-    &C_CloseAllSessions,
-    &C_GetSessionInfo,
-    &C_GetOperationState,
-    &C_SetOperationState,
-    &C_Login,
-    &C_Logout,
-    &C_CreateObject,
-    &C_CopyObject,
-    &C_DestroyObject,
-    &C_GetObjectSize,
-    &C_GetAttributeValue,
-    &C_SetAttributeValue,
-    &C_FindObjectsInit,
-    &C_FindObjects,
-    &C_FindObjectsFinal,
-    &C_EncryptInit,
-    &C_Encrypt,
-    &C_EncryptUpdate,
-    &C_EncryptFinal,
-    &C_DecryptInit,
-    &C_Decrypt,
-    &C_DecryptUpdate,
-    &C_DecryptFinal,
-    &C_DigestInit,
-    &C_Digest,
-    &C_DigestUpdate,
-    &C_DigestKey,
-    &C_DigestFinal,
-    &C_SignInit,
-    &C_Sign,
-    &C_SignUpdate,
-    &C_SignFinal,
-    &C_SignRecoverInit,
-    &C_SignRecover,
-    &C_VerifyInit,
-    &C_Verify,
-    &C_VerifyUpdate,
-    &C_VerifyFinal,
-    &C_VerifyRecoverInit,
-    &C_VerifyRecover,
-    &C_DigestEncryptUpdate,
-    &C_DecryptDigestUpdate,
-    &C_SignEncryptUpdate,
-    &C_DecryptVerifyUpdate,
-    &C_GenerateKey,
-    &C_GenerateKeyPair,
-    &C_WrapKey,
-    &C_UnwrapKey,
-    &C_DeriveKey,
-    &C_SeedRandom,
-    &C_GenerateRandom,
-    &C_GetFunctionStatus,
-    &C_CancelFunction,
-    &C_WaitForSlotEvent
-};
+CK_FUNCTION_LIST p11pa_functions;
 
 CK_DEFINE_FUNCTION(CK_RV, C_Initialize)(CK_VOID_PTR pInitArgs)
 {
@@ -236,6 +165,85 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetFunctionList)(CK_FUNCTION_LIST_PTR_PTR ppFunction
 {
     if (NULL == ppFunctionList)
         return CKR_ARGUMENTS_BAD;
+
+    //
+    // Set the function pointers at runtime
+    //
+
+    p11pa_functions.version.major = 2;
+    p11pa_functions.version.minor = 20;
+    p11pa_functions.C_Initialize = C_Initialize;
+    p11pa_functions.C_Finalize = C_Finalize;
+    p11pa_functions.C_GetInfo = C_GetInfo;
+    p11pa_functions.C_GetFunctionList = C_GetFunctionList;
+    p11pa_functions.C_GetSlotList = C_GetSlotList;
+    p11pa_functions.C_GetSlotInfo = C_GetSlotInfo;
+    p11pa_functions.C_GetTokenInfo = C_GetTokenInfo;
+    p11pa_functions.C_GetMechanismList = C_GetMechanismList;
+    p11pa_functions.C_GetMechanismInfo = C_GetMechanismInfo;
+    p11pa_functions.C_InitToken = C_InitToken;
+    p11pa_functions.C_InitPIN = C_InitPIN;
+    p11pa_functions.C_SetPIN = C_SetPIN;
+    p11pa_functions.C_OpenSession = C_OpenSession;
+    p11pa_functions.C_CloseSession = C_CloseSession;
+    p11pa_functions.C_CloseAllSessions = C_CloseAllSessions;
+    p11pa_functions.C_GetSessionInfo = C_GetSessionInfo;
+    p11pa_functions.C_GetOperationState = C_GetOperationState;
+    p11pa_functions.C_SetOperationState = C_SetOperationState;
+    p11pa_functions.C_Login = C_Login;
+    p11pa_functions.C_Logout = C_Logout;
+    p11pa_functions.C_CreateObject = C_CreateObject;
+    p11pa_functions.C_CopyObject = C_CopyObject;
+    p11pa_functions.C_DestroyObject = C_DestroyObject;
+    p11pa_functions.C_GetObjectSize = C_GetObjectSize;
+    p11pa_functions.C_GetAttributeValue = C_GetAttributeValue;
+    p11pa_functions.C_SetAttributeValue = C_SetAttributeValue;
+    p11pa_functions.C_FindObjectsInit = C_FindObjectsInit;
+    p11pa_functions.C_FindObjects = C_FindObjects;
+    p11pa_functions.C_FindObjectsFinal = C_FindObjectsFinal;
+    p11pa_functions.C_EncryptInit = C_EncryptInit;
+    p11pa_functions.C_Encrypt = C_Encrypt;
+    p11pa_functions.C_EncryptUpdate = C_EncryptUpdate;
+    p11pa_functions.C_EncryptFinal = C_EncryptFinal;
+    p11pa_functions.C_DecryptInit = C_DecryptInit;
+    p11pa_functions.C_Decrypt = C_Decrypt;
+    p11pa_functions.C_DecryptUpdate = C_DecryptUpdate;
+    p11pa_functions.C_DecryptFinal = C_DecryptFinal;
+    p11pa_functions.C_DigestInit = C_DigestInit;
+    p11pa_functions.C_Digest = C_Digest;
+    p11pa_functions.C_DigestUpdate = C_DigestUpdate;
+    p11pa_functions.C_DigestKey = C_DigestKey;
+    p11pa_functions.C_DigestFinal = C_DigestFinal;
+    p11pa_functions.C_SignInit = C_SignInit;
+    p11pa_functions.C_Sign = C_Sign;
+    p11pa_functions.C_SignUpdate = C_SignUpdate;
+    p11pa_functions.C_SignFinal = C_SignFinal;
+    p11pa_functions.C_SignRecoverInit = C_SignRecoverInit;
+    p11pa_functions.C_SignRecover = C_SignRecover;
+    p11pa_functions.C_VerifyInit = C_VerifyInit;
+    p11pa_functions.C_Verify = C_Verify;
+    p11pa_functions.C_VerifyUpdate = C_VerifyUpdate;
+    p11pa_functions.C_VerifyFinal = C_VerifyFinal;
+    p11pa_functions.C_VerifyRecoverInit = C_VerifyRecoverInit;
+    p11pa_functions.C_VerifyRecover = C_VerifyRecover;
+    p11pa_functions.C_DigestEncryptUpdate = C_DigestEncryptUpdate;
+    p11pa_functions.C_DecryptDigestUpdate = C_DecryptDigestUpdate;
+    p11pa_functions.C_SignEncryptUpdate = C_SignEncryptUpdate;
+    p11pa_functions.C_DecryptVerifyUpdate = C_DecryptVerifyUpdate;
+    p11pa_functions.C_GenerateKey = C_GenerateKey;
+    p11pa_functions.C_GenerateKeyPair = C_GenerateKeyPair;
+    p11pa_functions.C_WrapKey = C_WrapKey;
+    p11pa_functions.C_UnwrapKey = C_UnwrapKey;
+    p11pa_functions.C_DeriveKey = C_DeriveKey;
+    p11pa_functions.C_SeedRandom = C_SeedRandom;
+    p11pa_functions.C_GenerateRandom = C_GenerateRandom;
+    p11pa_functions.C_GetFunctionStatus = C_GetFunctionStatus;
+    p11pa_functions.C_CancelFunction = C_CancelFunction;
+    p11pa_functions.C_WaitForSlotEvent = C_WaitForSlotEvent;
+
+    //
+    // Return the populated structure
+    //
 
     *ppFunctionList = &p11pa_functions;
     
@@ -1026,7 +1034,8 @@ CK_DEFINE_FUNCTION(CK_RV, C_FindObjects)(CK_SESSION_HANDLE hSession, CK_OBJECT_H
     if (CK_FALSE == p11pa_initialized)
         return CKR_CRYPTOKI_NOT_INITIALIZED;
 
-    if (P11PA_OPERATION_FIND != p11pa_active_operation)
+    if (    P11PA_OPERATION_FIND != p11pa_active_operation &&
+            P11PA_OPERATION_FIND_COMPLETE != p11pa_active_operation)
         return CKR_OPERATION_NOT_INITIALIZED;
 
     if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
@@ -1038,10 +1047,15 @@ CK_DEFINE_FUNCTION(CK_RV, C_FindObjects)(CK_SESSION_HANDLE hSession, CK_OBJECT_H
     if (NULL == pulObjectCount)
         return CKR_ARGUMENTS_BAD;
 
+    if (P11PA_OPERATION_FIND_COMPLETE == p11pa_active_operation) 
+    {
+        *pulObjectCount = 0;
+        return CKR_OK;
+    }
+
     switch (p11pa_find_result)
     {
     case P11PA_OBJECT_HANDLE_DATA:
-
         if (ulMaxObjectCount >= 2)
         {
             phObject[0] = p11pa_find_result;
@@ -1049,24 +1063,21 @@ CK_DEFINE_FUNCTION(CK_RV, C_FindObjects)(CK_SESSION_HANDLE hSession, CK_OBJECT_H
         }
 
         *pulObjectCount = 2;
-
+        p11pa_active_operation = P11PA_OPERATION_FIND_COMPLETE;
         break;
 
     case CK_INVALID_HANDLE:
-
         *pulObjectCount = 0;
-
         break;
 
     default:
-
         if (ulMaxObjectCount >= 1)
         {
             phObject[0] = p11pa_find_result;
         }
 
         *pulObjectCount = 1;
-
+        p11pa_active_operation = P11PA_OPERATION_FIND_COMPLETE;
         break;
     }
 
@@ -1080,7 +1091,8 @@ CK_DEFINE_FUNCTION(CK_RV, C_FindObjectsFinal)(CK_SESSION_HANDLE hSession)
     if (CK_FALSE == p11pa_initialized)
         return CKR_CRYPTOKI_NOT_INITIALIZED;
 
-    if (P11PA_OPERATION_FIND != p11pa_active_operation)
+    if (    P11PA_OPERATION_FIND != p11pa_active_operation && 
+            P11PA_OPERATION_FIND_COMPLETE != p11pa_active_operation)
         return CKR_OPERATION_NOT_INITIALIZED;
 
     if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))

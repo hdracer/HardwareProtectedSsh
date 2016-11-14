@@ -7,7 +7,7 @@
 // 
 // PKCS#11 platform definitions
 //
-#pragma pack(push, cryptoki, 1)
+//#pragma pack(push, cryptoki, 1)
 #define CK_PTR *
 
 #ifndef NULL_PTR
@@ -25,7 +25,7 @@
 
 #define CK_CALL_SPEC __cdecl 
 
-#define CK_PTR *
+//#define CK_PTR *
 #define CK_DEFINE_FUNCTION(returnType, name) returnType CK_EXPORT_SPEC CK_CALL_SPEC name
 #define CK_DECLARE_FUNCTION(returnType, name) returnType CK_EXPORT_SPEC CK_CALL_SPEC name
 #define CK_DECLARE_FUNCTION_POINTER(returnType, name) returnType CK_IMPORT_SPEC (CK_CALL_SPEC CK_PTR name)
@@ -40,4 +40,4 @@
 
 #include "pkcs11.h"
 
-#pragma pack(pop, cryptoki)
+//#pragma pack(pop, cryptoki)
