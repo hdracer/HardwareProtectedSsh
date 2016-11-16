@@ -6,6 +6,7 @@
 
 #include "stdafx.h"
 #include "libp11platformattestation.h"
+#include "attestationlib.h"
 
 //
 // Flow macros
@@ -54,8 +55,22 @@ void _OutputDbgStr(
 }
 
 #define LOG_CALL(_X, _Y) {                                                  \
-    _OutputDbgStr(__FILE__, __LINE__, #_X, NULL, (CK_ULONG)_Y);             \
+    _OutputDbgStr(__FILE__, __LINE__, _X, NULL, (CK_ULONG)_Y);              \
 }
+
+#define CHECK_ALLOC(_X) {                                                   \
+    if (0 == (_X)) {                                                        \
+        result = CKR_HOST_MEMORY;                                           \
+        goto out;                                                           \
+    }                                                                       \
+}
+
+#define CHECK_CKR(_X) {                                                     \
+    if (CKR_OK != (result = (_X))) {                                        \
+        _OutputDbgStr(__FILE__, __LINE__, #_X, NULL, (CK_ULONG) result);    \
+        goto out;                                                           \
+    }                                                                       \
+}        
 
 //
 // Static string defines
@@ -103,12 +118,39 @@ typedef enum
     P11PA_OPERATION_DECRYPT_VERIFY
 } P11PA_OPERATION;
 
+//
+// Global state: not thread safe
+//
+
 CK_BBOOL p11pa_initialized = CK_FALSE;
 CK_BBOOL p11pa_session_opened = CK_FALSE;
 CK_ULONG p11pa_session_state = CKS_RO_PUBLIC_SESSION;
 P11PA_OPERATION p11pa_active_operation = P11PA_OPERATION_NONE;
 CK_OBJECT_HANDLE p11pa_find_result = CKR_OBJECT_HANDLE_INVALID;
 CK_FUNCTION_LIST p11pa_functions;
+
+//
+// Key structure
+//
+
+typedef struct _P11PA_KEY
+{
+    CAttestationLib *pAttestationLib;
+} P11PA_KEY, *PP11PA_KEY;
+
+//
+// Session structure
+//
+
+typedef struct _P11PA_SESSION
+{
+    PP11PA_KEY pCurrentKey;
+    CK_ULONG ulState;
+} P11PA_SESSION, *PP11PA_SESSION;
+
+//
+// Begin PKCS#11 module implementation
+//
 
 CK_DEFINE_FUNCTION(CK_RV, C_Initialize)(CK_VOID_PTR pInitArgs)
 {
@@ -349,52 +391,86 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetTokenInfo)(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR p
 
 CK_DEFINE_FUNCTION(CK_RV, C_GetMechanismList)(CK_SLOT_ID slotID, CK_MECHANISM_TYPE_PTR pMechanismList, CK_ULONG_PTR pulCount)
 {
+    CK_RV result = CKR_OK;
+    CK_ULONG iMech = 0;
+    CK_MECHANISM_TYPE Mechanisms[] = {
+        CKM_RSA_PKCS_KEY_PAIR_GEN,
+        CKM_RSA_PKCS,
+        CKM_SHA1_RSA_PKCS
+    };
+
+    //
+    // Check parameters
+    //
+
     if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    {
+        CHECK_CKR(CKR_CRYPTOKI_NOT_INITIALIZED);
+    }
 
     if (P11PA_SLOT_ID != slotID)
-        return CKR_SLOT_ID_INVALID;
+    {
+        CHECK_CKR(CKR_SLOT_ID_INVALID);
+    }
 
     if (NULL == pulCount)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pMechanismList)
     {
-        *pulCount = 9;
-    }
-    else
-    {
-        if (9 > *pulCount)
-            return CKR_BUFFER_TOO_SMALL;
-
-        pMechanismList[0] = CKM_RSA_PKCS_KEY_PAIR_GEN;
-        pMechanismList[1] = CKM_RSA_PKCS;
-        pMechanismList[2] = CKM_SHA1_RSA_PKCS;
-        pMechanismList[3] = CKM_RSA_PKCS_OAEP;
-        pMechanismList[4] = CKM_DES3_CBC;
-        pMechanismList[5] = CKM_DES3_KEY_GEN;
-        pMechanismList[6] = CKM_SHA_1;
-        pMechanismList[7] = CKM_XOR_BASE_AND_DATA;
-        pMechanismList[8] = CKM_AES_CBC;
-
-        *pulCount = 9;
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
     }
 
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    if (NULL != pMechanismList)
+    {
+        if (sizeof(Mechanisms) / sizeof(Mechanisms[0]) > *pulCount)
+        {
+            result = CKR_BUFFER_TOO_SMALL;
+        }
+        else
+        {
+            //
+            // Return list of supported mechanisms
+            //
+
+            for (; iMech < sizeof(Mechanisms) / sizeof(Mechanisms[0]); iMech++)
+            {
+                pMechanismList[iMech] = Mechanisms[iMech];
+            }
+        }
+    }
+
+    *pulCount = sizeof(Mechanisms) / sizeof(Mechanisms[0]);
+
+out:
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_GetMechanismInfo)(CK_SLOT_ID slotID, CK_MECHANISM_TYPE type, CK_MECHANISM_INFO_PTR pInfo)
 {
+    CK_RV result = CKR_OK;
+
+    //
+    // Check parameters
+    //
+
     if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    {
+        CHECK_CKR(CKR_CRYPTOKI_NOT_INITIALIZED);
+    }
 
     if (P11PA_SLOT_ID != slotID)
-        return CKR_SLOT_ID_INVALID;
+    {
+        CHECK_CKR(CKR_SLOT_ID_INVALID);
+    }
 
     if (NULL == pInfo)
-        return CKR_ARGUMENTS_BAD;
+    {
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
+    }
+
+    //
+    // Return requested mechanism info
+    //
 
     switch (type)
     {
@@ -407,7 +483,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetMechanismInfo)(CK_SLOT_ID slotID, CK_MECHANISM_TY
     case CKM_RSA_PKCS:
         pInfo->ulMinKeySize = 1024;
         pInfo->ulMaxKeySize = 1024;
-        pInfo->flags = CKF_ENCRYPT | CKF_DECRYPT | CKF_SIGN | CKF_SIGN_RECOVER | CKF_VERIFY | CKF_VERIFY_RECOVER | CKF_WRAP | CKF_UNWRAP;
+        pInfo->flags = CKF_SIGN | CKF_VERIFY;
         break;
 
     case CKM_SHA1_RSA_PKCS:
@@ -416,48 +492,13 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetMechanismInfo)(CK_SLOT_ID slotID, CK_MECHANISM_TY
         pInfo->flags = CKF_SIGN | CKF_VERIFY;
         break;
 
-    case CKM_RSA_PKCS_OAEP:
-        pInfo->ulMinKeySize = 1024;
-        pInfo->ulMaxKeySize = 1024;
-        pInfo->flags = CKF_ENCRYPT | CKF_DECRYPT;
-        break;
-
-    case CKM_DES3_CBC:
-        pInfo->ulMinKeySize = 192;
-        pInfo->ulMaxKeySize = 192;
-        pInfo->flags = CKF_ENCRYPT | CKF_DECRYPT;
-        break;
-
-    case CKM_DES3_KEY_GEN:
-        pInfo->ulMinKeySize = 192;
-        pInfo->ulMaxKeySize = 192;
-        pInfo->flags = CKF_GENERATE;
-        break;
-
-    case CKM_SHA_1:
-        pInfo->ulMinKeySize = 0;
-        pInfo->ulMaxKeySize = 0;
-        pInfo->flags = CKF_DIGEST;
-        break;
-
-    case CKM_XOR_BASE_AND_DATA:
-        pInfo->ulMinKeySize = 128;
-        pInfo->ulMaxKeySize = 256;
-        pInfo->flags = CKF_DERIVE;
-        break;
-
-    case CKM_AES_CBC:
-        pInfo->ulMinKeySize = 128;
-        pInfo->ulMaxKeySize = 256;
-        pInfo->flags = CKF_ENCRYPT | CKF_DECRYPT;
-        break;
-
     default:
-        return CKR_MECHANISM_INVALID;
+        CHECK_CKR(CKR_MECHANISM_INVALID);
     }
 
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+out:
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
@@ -536,50 +577,98 @@ CK_DEFINE_FUNCTION(CK_RV, C_SetPIN)(CK_SESSION_HANDLE hSession, CK_UTF8CHAR_PTR 
 }
 
 
-CK_DEFINE_FUNCTION(CK_RV, C_OpenSession)(CK_SLOT_ID slotID, CK_FLAGS flags, CK_VOID_PTR pApplication, CK_NOTIFY Notify, CK_SESSION_HANDLE_PTR phSession)
+CK_DEFINE_FUNCTION(CK_RV, C_OpenSession)(
+    CK_SLOT_ID slotID, 
+    CK_FLAGS flags, 
+    CK_VOID_PTR pApplication, 
+    CK_NOTIFY Notify, 
+    CK_SESSION_HANDLE_PTR phSession)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (CK_TRUE == p11pa_session_opened)
-        return CKR_SESSION_COUNT;
-
-    if (P11PA_SLOT_ID != slotID)
-        return CKR_SLOT_ID_INVALID;
-
-    if (!(flags & CKF_SERIAL_SESSION))
-        return CKR_SESSION_PARALLEL_NOT_SUPPORTED;
+    CK_RV result = CKR_OK;
+    PP11PA_SESSION pSession = 0;
 
     UNREFERENCED_PARAMETER(pApplication);
-
     UNREFERENCED_PARAMETER(Notify);
 
+    //
+    // Check parameters
+    //
+
+    if (CK_FALSE == p11pa_initialized)
+    {
+        CHECK_CKR(CKR_CRYPTOKI_NOT_INITIALIZED);
+    }
+    if (CK_TRUE == p11pa_session_opened)
+    {
+        CHECK_CKR(CKR_SESSION_COUNT);
+    }
+    if (P11PA_SLOT_ID != slotID)
+    {
+        CHECK_CKR(CKR_SLOT_ID_INVALID);
+    }
+    if (!(flags & CKF_SERIAL_SESSION))
+    {
+        CHECK_CKR(CKR_SESSION_PARALLEL_NOT_SUPPORTED);
+    }
     if (NULL == phSession)
-        return CKR_ARGUMENTS_BAD;
+    {
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
+    }
+
+    //
+    // Allocate the session
+    //
+
+    CHECK_ALLOC(pSession = (PP11PA_SESSION)malloc(sizeof(P11PA_SESSION)));
+    pSession->ulState = 
+        (flags & CKF_RW_SESSION) ? CKS_RW_PUBLIC_SESSION : CKS_RO_PUBLIC_SESSION;
 
     p11pa_session_opened = CK_TRUE;
-    p11pa_session_state = (flags & CKF_RW_SESSION) ? CKS_RW_PUBLIC_SESSION : CKS_RO_PUBLIC_SESSION;
-    *phSession = P11PA_SESSION_ID;
 
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    //
+    // Return the session
+    //
+
+    *phSession = (CK_SESSION_HANDLE) pSession;
+    pSession = 0;
+
+out:
+    if (0 != pSession)
+        free(pSession);
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_CloseSession)(CK_SESSION_HANDLE hSession)
 {
+    CK_RV result = CKR_OK;
+
+    //
+    // Check parameters
+    //
+
     if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    {
+        CHECK_CKR(CKR_CRYPTOKI_NOT_INITIALIZED);
+    }
+    if (0 == hSession)
+    {
+        CHECK_CKR(CKR_SESSION_HANDLE_INVALID);
+    }
 
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
+    //
+    // Tear down the session
+    //
 
+    free((void *) hSession);
     p11pa_session_opened = CK_FALSE;
     p11pa_session_state = CKS_RO_PUBLIC_SESSION;
     p11pa_active_operation = P11PA_OPERATION_NONE;
 
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+out:
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
@@ -1702,83 +1791,132 @@ CK_DEFINE_FUNCTION(CK_RV, C_DigestFinal)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR
 }
 
 
-CK_DEFINE_FUNCTION(CK_RV, C_SignInit)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
+CK_DEFINE_FUNCTION(CK_RV, C_SignInit)(
+    CK_SESSION_HANDLE hSession, 
+    CK_MECHANISM_PTR pMechanism, 
+    CK_OBJECT_HANDLE hKey)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    CK_RV result = CKR_OK;
+    PP11PA_SESSION pSession = (PP11PA_SESSION)hSession;
 
+    //
+    // Check parameters
+    //
+
+    if (CK_FALSE == p11pa_initialized)
+    {
+        CHECK_CKR(CKR_CRYPTOKI_NOT_INITIALIZED);
+    }
     if ((P11PA_OPERATION_NONE != p11pa_active_operation) &&
         (P11PA_OPERATION_ENCRYPT != p11pa_active_operation))
-        return CKR_OPERATION_ACTIVE;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pMechanism)
-        return CKR_ARGUMENTS_BAD;
-
-    if ((CKM_RSA_PKCS == pMechanism->mechanism) || (CKM_SHA1_RSA_PKCS == pMechanism->mechanism))
     {
-        if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_PRIVATE_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
+        CHECK_CKR(CKR_OPERATION_ACTIVE);
     }
-    else
+    if (0 == hSession)
     {
-        return CKR_MECHANISM_INVALID;
+        CHECK_CKR(CKR_SESSION_HANDLE_INVALID);
+    }
+    if (0 == pMechanism)
+    {
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
+    }
+    if (CKM_RSA_PKCS != pMechanism->mechanism && CKM_SHA1_RSA_PKCS != pMechanism->mechanism)
+    {
+        CHECK_CKR(CKR_MECHANISM_INVALID);
+    }
+    if (0 != pMechanism->pParameter || 0 != pMechanism->ulParameterLen)
+    {
+        CHECK_CKR(CKR_MECHANISM_PARAM_INVALID);
+    }
+    if (0 == hKey)
+    {
+        CHECK_CKR(CKR_KEY_HANDLE_INVALID);
     }
 
-    if (P11PA_OPERATION_NONE == p11pa_active_operation)
-        p11pa_active_operation = P11PA_OPERATION_SIGN;
-    else
-        p11pa_active_operation = P11PA_OPERATION_SIGN_ENCRYPT;
+    //
+    // Update the session
+    //
 
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    pSession->pCurrentKey = (PP11PA_KEY)hKey;
+    p11pa_active_operation = P11PA_OPERATION_SIGN;
+
+out:
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_Sign)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
-    CK_BYTE signature[10] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09 };
+    CK_RV result = CKR_OK;
+    PP11PA_SESSION pSession = (PP11PA_SESSION)hSession;
+    ByteVec signatureBytes;
+
+    //
+    // Check parameters
+    //
 
     if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
+    {
+        CHECK_CKR(CKR_CRYPTOKI_NOT_INITIALIZED);
+    }
     if (P11PA_OPERATION_SIGN != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
+    {
+        CHECK_CKR(CKR_OPERATION_NOT_INITIALIZED);
+    }
+    if (0 == hSession)
+    {
+        CHECK_CKR(CKR_SESSION_HANDLE_INVALID);
+    }
+    if (0 == pSession->pCurrentKey)
+    {
+        CHECK_CKR(CKR_KEY_HANDLE_INVALID);
+    }
     if (NULL == pData)
-        return CKR_ARGUMENTS_BAD;
-
+    {
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
+    }
     if (0 >= ulDataLen)
-        return CKR_ARGUMENTS_BAD;
-
+    {
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
+    }
     if (NULL == pulSignatureLen)
-        return CKR_ARGUMENTS_BAD;
+    {
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
+    }
+
+    //
+    // Sign the data
+    //
+
+    if (false == pSession->pCurrentKey->pAttestationLib->SignHash(
+        ByteVec(pData, pData + ulDataLen), signatureBytes))
+    {
+        CHECK_CKR(CKR_FUNCTION_FAILED);
+    }
+
+    //
+    // Return the signature
+    //
 
     if (NULL != pSignature)
     {
-        if (sizeof(signature) > *pulSignatureLen)
+        if (signatureBytes.size() > *pulSignatureLen)
         {
-            return CKR_BUFFER_TOO_SMALL;
+            result = CKR_BUFFER_TOO_SMALL;
         }
         else
         {
-            memcpy(pSignature, signature, sizeof(signature));
+            memcpy(pSignature, signatureBytes.data(), signatureBytes.size());
             p11pa_active_operation = P11PA_OPERATION_NONE;
         }
     }
 
-    *pulSignatureLen = sizeof(signature);
+    *pulSignatureLen = signatureBytes.size();
 
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+out:
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
@@ -2347,40 +2485,44 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKey)(CK_SESSION_HANDLE hSession, CK_MECHANIS
 }
 
 
-CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_ATTRIBUTE_PTR pPublicKeyTemplate, CK_ULONG ulPublicKeyAttributeCount, CK_ATTRIBUTE_PTR pPrivateKeyTemplate, CK_ULONG ulPrivateKeyAttributeCount, CK_OBJECT_HANDLE_PTR phPublicKey, CK_OBJECT_HANDLE_PTR phPrivateKey)
+CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(
+    CK_SESSION_HANDLE hSession, 
+    CK_MECHANISM_PTR pMechanism, 
+    CK_ATTRIBUTE_PTR pPublicKeyTemplate, 
+    CK_ULONG ulPublicKeyAttributeCount, 
+    CK_ATTRIBUTE_PTR pPrivateKeyTemplate, 
+    CK_ULONG ulPrivateKeyAttributeCount, 
+    CK_OBJECT_HANDLE_PTR phPublicKey, 
+    CK_OBJECT_HANDLE_PTR phPrivateKey)
 {
+    CK_RV result = CKR_OK;
     CK_ULONG i = 0;
+    PP11PA_KEY pKey = 0;
+
+    //
+    // Parameter checking
+    //
 
     if (CK_FALSE == p11pa_initialized)
         return CKR_CRYPTOKI_NOT_INITIALIZED;
-
     if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
         return CKR_SESSION_HANDLE_INVALID;
-
     if (NULL == pMechanism)
         return CKR_ARGUMENTS_BAD;
-
     if (CKM_RSA_PKCS_KEY_PAIR_GEN != pMechanism->mechanism)
         return CKR_MECHANISM_INVALID;
-
     if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
         return CKR_MECHANISM_PARAM_INVALID;
-
     if (NULL == pPublicKeyTemplate)
         return CKR_ARGUMENTS_BAD;
-
     if (0 >= ulPublicKeyAttributeCount)
         return CKR_ARGUMENTS_BAD;
-
     if (NULL == pPrivateKeyTemplate)
         return CKR_ARGUMENTS_BAD;
-
     if (0 >= ulPrivateKeyAttributeCount)
         return CKR_ARGUMENTS_BAD;
-
     if (NULL == phPublicKey)
         return CKR_ARGUMENTS_BAD;
-
     if (NULL == phPrivateKey)
         return CKR_ARGUMENTS_BAD;
 
@@ -2402,11 +2544,68 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(CK_SESSION_HANDLE hSession, CK_MECH
             return CKR_ATTRIBUTE_VALUE_INVALID;
     }
 
-    *phPublicKey = P11PA_OBJECT_HANDLE_PUBLIC_KEY;
-    *phPrivateKey = P11PA_OBJECT_HANDLE_PRIVATE_KEY;
+    //
+    // Create the key structure
+    //
 
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CHECK_ALLOC(pKey = (PP11PA_KEY)malloc(sizeof(P11PA_KEY)));
+    CHECK_ALLOC(pKey->pAttestationLib = new CAttestationLib());
+
+    //
+    // Initialize
+    //
+
+    pKey->pAttestationLib->Initialize(
+        std::string("https://strongnetsvc.jwsecure.com"));
+
+    //
+    // Attest
+    //
+
+    if (false == pKey->pAttestationLib->CreateAttestationIdentityKey())
+    {
+        CHECK_CKR(CKR_FUNCTION_FAILED);
+    }
+
+    //
+    // Create the key
+    //
+
+    if (false == pKey->pAttestationLib->CreateSealedUserKey())
+    {
+        CHECK_CKR(CKR_FUNCTION_FAILED);
+    }
+
+    // 
+    // Serialize the key
+    //
+
+    // TODO
+
+    //
+    // Save the key
+    //
+
+    // TODO
+
+    //
+    // Return the key handles
+    //
+
+    *phPublicKey = (CK_OBJECT_HANDLE) pKey;
+    *phPrivateKey = (CK_OBJECT_HANDLE) pKey;
+    pKey = 0;
+
+out:
+    if (0 != pKey)
+    {
+        if (0 != pKey->pAttestationLib)
+            delete pKey->pAttestationLib;
+        free(pKey);
+    }
+
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 

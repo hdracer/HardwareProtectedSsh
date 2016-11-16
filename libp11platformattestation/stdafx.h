@@ -3,6 +3,11 @@
 #include "targetver.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <vector>
+#include <string>
+#include <map>
+#include <iostream>
+#include <iomanip>
 
 #ifndef __linux__
 // Windows-only

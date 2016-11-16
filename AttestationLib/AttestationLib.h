@@ -16,9 +16,12 @@ public:
     void Initialize(std::string attestationServerUrl);
     bool CreateAttestationIdentityKey();
     bool CreateSealedUserKey();
+    bool SaveSealedUserKey(ByteVec &serializedKey);
+    bool LoadSealedUserKey(const ByteVec &serializedKey);
     bool CheckUserKeyWhitelist();
     void ShowTpmCapabilities();
     bool SignAndVerifyMessage(const std::string &message);
+    bool SignHash(const ByteVec &hashBytes, ByteVec &signatureBytes);
     ByteVec GetEkPubHash();
 
 private:

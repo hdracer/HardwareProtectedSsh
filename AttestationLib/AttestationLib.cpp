@@ -21,6 +21,17 @@ using namespace web::http::experimental::listener;
 
 #define TPM_FOR_IOT_HASH_ALG TPM_ALG_ID::SHA1
 
+//
+// Structure for flat key storage
+//
+typedef struct _ATTESTED_TPM_KEY
+{
+} ATTESTED_TPM_KEY, *PATTESTED_TPM_KEY;
+
+//
+// Class implementation
+//
+
 CAttestationLib::CAttestationLib()
 {
     return;
@@ -128,12 +139,6 @@ bool CAttestationLib::CreateAttestationIdentityKey()
         m_hEk,
         encryptedSecret.CredentialBlob,
         encryptedSecret.Secret);
-
-    //
-    // Optionally, save the AIK, since it can be reused across reboots
-    //
-
-    // TODO
     return true;
 }
 
@@ -223,9 +228,103 @@ bool CAttestationLib::CreateSealedUserKey()
     return true;
 }
 
+bool CAttestationLib::SaveSealedUserKey(ByteVec &serializedKey)
+{
+    //
+    // Serialize the EK
+    //
+
+    // TODO
+
+    //
+    // Serialize the SRK
+    //
+
+    // TODO
+
+    //
+    // Serialize the AIK
+    //
+
+    // TODO
+
+    //
+    // Serialize the user key
+    //
+
+    // TODO
+
+    //
+    // Populate the flat key structure
+    //
+    
+    // TODO
+
+    //
+    // Output the blob
+    //
+
+    // TODO
+
+    return true;
+}
+
+bool CAttestationLib::LoadSealedUserKey(const ByteVec &serializedKey)
+{
+    //
+    // Deserialize the EK
+    //
+
+    // TODO
+
+    //
+    // Deserialize the SRK
+    //
+
+    // TODO
+
+    //
+    // Deserialize the AIK
+    //
+
+    // TODO
+
+    //
+    // Deserialize the user key
+    //
+
+    // TODO
+
+    return true;
+}
+
 bool CAttestationLib::CheckUserKeyWhitelist()
 {
     return RestLookupRegisteredKey(m_userPub);
+}
+
+bool CAttestationLib::SignHash(const ByteVec &hashBytes, ByteVec &signatureBytes)
+{
+    //
+    // Sign a message with the user key
+    //
+
+    auto signature = m_tpm.Sign(
+        m_hUser,
+        hashBytes,
+        TPMS_NULL_SIG_SCHEME(),
+        TPMT_TK_HASHCHECK::NullTicket());
+
+    //
+    // Return the signature bytes
+    //
+
+    TPMS_SIGNATURE_RSASSA *pSig = dynamic_cast<TPMS_SIGNATURE_RSASSA *> (signature.signature);
+    for (unsigned int iByte = 0; iByte < pSig->sig.size(); iByte++)
+    {
+        signatureBytes.push_back(pSig->sig[iByte]);
+    }
+    return true;
 }
 
 bool CAttestationLib::SignAndVerifyMessage(const std::string &message)
