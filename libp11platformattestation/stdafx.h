@@ -8,6 +8,8 @@
 #include <map>
 #include <iostream>
 #include <iomanip>
+#include <filesystem>
+#include <fstream>
 
 #ifndef __linux__
 // Windows-only
@@ -28,3 +30,9 @@
 #define UNREFERENCED_PARAMETER(x) (void)(x)
 #define _snprintf_s(a,b,c,...) snprintf(a,b,__VA_ARGS__)
 #endif
+
+#ifndef __linux__
+#pragma warning(once:4251)
+#pragma warning(once:4091)
+#endif
+#include "Tpm2.h"

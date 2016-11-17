@@ -57,9 +57,7 @@
 #include "cpprest/http_client.h"
 
 #ifndef __linux__
-// REVISIT: Lots of these warnings.
-#pragma  warning(once:4251)
+#pragma warning(once:4251)
+#pragma warning(once:4091)
 #endif
-
-// Include this line to make compiles faster!
 #include "Tpm2.h"

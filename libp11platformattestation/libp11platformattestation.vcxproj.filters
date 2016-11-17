@@ -33,7 +33,7 @@
     <ClInclude Include="pkcs11t.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="helpers.h">
+    <ClInclude Include="p11helpers.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -47,7 +47,7 @@
     <ClCompile Include="dllmain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="helpers.cpp">
+    <ClCompile Include="p11helpers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

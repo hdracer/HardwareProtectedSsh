@@ -22,10 +22,14 @@ using namespace web::http::experimental::listener;
 #define TPM_FOR_IOT_HASH_ALG TPM_ALG_ID::SHA1
 
 //
-// Structure for flat key storage
+// Structure for flat key storage header
 //
 typedef struct _ATTESTED_TPM_KEY
 {
+    unsigned int cbEndorsementKey;
+    unsigned int cbStorageRootKey;
+    unsigned int cbAttestationIdentityKey;
+    unsigned int cbAttestedUserKey;
 } ATTESTED_TPM_KEY, *PATTESTED_TPM_KEY;
 
 //
@@ -180,7 +184,7 @@ bool CAttestationLib::CreateSealedUserKey()
     // Include the same PCR selection as above
     //
 
-    CreateResponse newSigningKey = m_tpm.Create(
+    m_userCreate = m_tpm.Create(
         m_hSrk,
         TPMS_SENSITIVE_CREATE(NullVec, NullVec),
         templ,
@@ -193,8 +197,8 @@ bool CAttestationLib::CreateSealedUserKey()
 
     m_hUser = m_tpm.Load(
         m_hSrk,
-        newSigningKey.outPrivate,
-        newSigningKey.outPublic);
+        m_userCreate.outPrivate,
+        m_userCreate.outPublic);
     auto userSigningPubX = m_tpm.ReadPublic(m_hUser);
     m_userPub = userSigningPubX.outPublic;
 
@@ -206,9 +210,9 @@ bool CAttestationLib::CreateSealedUserKey()
         m_hAik,
         m_hUser,
         m_decryptedTpmSecret,
-        newSigningKey.creationHash,
+        m_userCreate.creationHash,
         TPMS_NULL_SIG_SCHEME(),
-        newSigningKey.creationTicket);
+        m_userCreate.creationTicket);
 
     //
     // Send the PCR quote and key certification to the server
@@ -218,7 +222,7 @@ bool CAttestationLib::CreateSealedUserKey()
         m_aikPub,
         pcrVals, 
         quote,
-        newSigningKey.creationData,
+        m_userCreate.creationData,
         createQuote))
     {
         cerr << "RestRegisterKey failed" << endl;
@@ -230,70 +234,147 @@ bool CAttestationLib::CreateSealedUserKey()
 
 bool CAttestationLib::SaveSealedUserKey(ByteVec &serializedKey)
 {
+    ATTESTED_TPM_KEY FlatKey = { 0 };
+    unsigned int cbFlatKey = 0;
+    ByteVec::iterator it;
+
     //
     // Serialize the EK
     //
 
-    // TODO
+    ByteVec ekBytes = m_ekCreate.ToBuf();
 
     //
     // Serialize the SRK
     //
 
-    // TODO
+    ByteVec srkBytes = m_srkCreate.ToBuf();
 
     //
     // Serialize the AIK
     //
 
-    // TODO
+    ByteVec aikBytes = m_aikCreate.ToBuf();
 
     //
     // Serialize the user key
     //
 
-    // TODO
+    ByteVec userBytes = m_userCreate.ToBuf();
 
     //
-    // Populate the flat key structure
+    // Populate the key header
     //
     
-    // TODO
+    FlatKey.cbEndorsementKey = (unsigned int) ekBytes.size();
+    FlatKey.cbStorageRootKey = (unsigned int) srkBytes.size();
+    FlatKey.cbAttestationIdentityKey = (unsigned int) aikBytes.size();
+    FlatKey.cbAttestedUserKey = (unsigned int) userBytes.size();
 
     //
-    // Output the blob
+    // Build the output
     //
 
-    // TODO
+    it = serializedKey.begin();
+    serializedKey.insert(
+        it + cbFlatKey,
+        (unsigned char *) &FlatKey,
+        ((unsigned char *) &FlatKey) + sizeof(FlatKey));
+    cbFlatKey += (unsigned int) sizeof(FlatKey);
 
+    it = serializedKey.begin();
+    serializedKey.insert(
+        it + cbFlatKey,
+        ekBytes.begin(),
+        ekBytes.end());
+    cbFlatKey += (unsigned int) ekBytes.size();
+
+    it = serializedKey.begin();
+    serializedKey.insert(
+        it + cbFlatKey,
+        srkBytes.begin(),
+        srkBytes.end());
+    cbFlatKey += (unsigned int) srkBytes.size();
+
+    it = serializedKey.begin();
+    serializedKey.insert(
+        it + cbFlatKey,
+        aikBytes.begin(),
+        aikBytes.end());
+    cbFlatKey += (unsigned int) aikBytes.size();
+
+    it = serializedKey.begin();
+    serializedKey.insert(
+        it + cbFlatKey,
+        userBytes.begin(),
+        userBytes.end());
+    cbFlatKey += (unsigned int) userBytes.size();
     return true;
 }
 
-bool CAttestationLib::LoadSealedUserKey(const ByteVec &serializedKey)
+bool CAttestationLib::LoadSealedUserKey(ByteVec &serializedKey)
 {
+    PATTESTED_TPM_KEY pFlatKey = 0;
+    unsigned int cbUsed = 0;
+    ByteVec::iterator it;
+    ByteVec bv;
+
+    //
+    // Parameter check
+    //
+
+    if (sizeof(ATTESTED_TPM_KEY) >= serializedKey.size())
+        return false;
+
+    //
+    // Get the header
+    //
+
+    pFlatKey = (PATTESTED_TPM_KEY) &serializedKey[0];
+    cbUsed += sizeof(ATTESTED_TPM_KEY);
+
+    if (    serializedKey.size() != 
+            sizeof(ATTESTED_TPM_KEY) + pFlatKey->cbEndorsementKey + 
+                pFlatKey->cbStorageRootKey + 
+                pFlatKey->cbAttestationIdentityKey + 
+                pFlatKey->cbAttestedUserKey)
+        return false;
+
     //
     // Deserialize the EK
     //
 
-    // TODO
+    it = serializedKey.begin();
+    bv.assign(it + cbUsed, it + cbUsed + pFlatKey->cbEndorsementKey);
+    m_ekCreate.FromBuf(bv);
+    cbUsed += pFlatKey->cbEndorsementKey;
 
     //
     // Deserialize the SRK
     //
 
-    // TODO
+    it = serializedKey.begin();
+    bv.assign(it + cbUsed, it + cbUsed + pFlatKey->cbStorageRootKey);
+    m_srkCreate.FromBuf(bv);
+    cbUsed += pFlatKey->cbStorageRootKey;
 
     //
     // Deserialize the AIK
     //
 
-    // TODO
+    it = serializedKey.begin();
+    bv.assign(it + cbUsed, it + cbUsed + pFlatKey->cbAttestationIdentityKey);
+    m_aikCreate.FromBuf(bv);
+    cbUsed += pFlatKey->cbAttestationIdentityKey;
 
     //
     // Deserialize the user key
     //
 
-    // TODO
+    it = serializedKey.begin();
+    bv.assign(it + cbUsed, it + cbUsed + pFlatKey->cbAttestedUserKey);
+    m_userCreate.FromBuf(bv);
+    cbUsed += pFlatKey->cbAttestedUserKey;
 
     return true;
 }
@@ -363,14 +444,28 @@ bool CAttestationLib::SignAndVerifyMessage(const std::string &message)
     // Process the message, as appropriate for the host app, based on whether 
     // the signature is valid and from a trusted device
     //
+    // ...
 
-    // TODO
     return true;
 }
 
-ByteVec CAttestationLib::GetEkPubHash()
+ByteVec CAttestationLib::GetEkPubHashBytes()
 {
     return CryptoServices::Hash(TPM_ALG_ID::SHA256, m_ekPub.ToBuf());
+}
+
+std::string CAttestationLib::GetUserPubHashHex()
+{
+    ByteVec bvPubHash = CryptoServices::Hash(TPM_ALG_ID::SHA256, m_userPub.ToBuf());
+
+    std::ostringstream ss;
+    ss << std::hex << std::setfill('0');
+    std::for_each(
+        bvPubHash.cbegin(), 
+        bvPubHash.cend(), 
+        [&](int c) { ss << std::setw(2) << c; });
+
+    return ss.str();
 }
 
 //
@@ -550,14 +645,14 @@ TPM_HANDLE CAttestationLib::MakeEndorsementKey()
         TPM2B_PUBLIC_KEY_RSA(NullVec));
 
     // Create the key
-    CreatePrimaryResponse ek = m_tpm.CreatePrimary(
+    m_ekCreate = m_tpm.CreatePrimary(
         m_tpm._AdminEndorsement,
         TPMS_SENSITIVE_CREATE(NullVec, NullVec),
         storagePrimaryTemplate,
         NullVec,
         vector<TPMS_PCR_SELECTION>());
 
-    return ek.objectHandle;
+    return m_ekCreate.objectHandle;
 }
 
 //
@@ -578,14 +673,14 @@ TPM_HANDLE CAttestationLib::MakeStoragePrimary()
         TPM2B_PUBLIC_KEY_RSA(NullVec));
 
     // Create the key
-    CreatePrimaryResponse storagePrimary = m_tpm.CreatePrimary(
+    m_srkCreate = m_tpm.CreatePrimary(
         m_tpm._AdminOwner,
         TPMS_SENSITIVE_CREATE(NullVec, NullVec),
         storagePrimaryTemplate,
         NullVec,
         vector<TPMS_PCR_SELECTION>());
 
-    return storagePrimary.objectHandle;
+    return m_srkCreate.objectHandle;
 }
 
 //
@@ -613,14 +708,15 @@ TPM_HANDLE CAttestationLib::MakeChildSigningKey(
             TPMS_SCHEME_RSASSA(TPM_FOR_IOT_HASH_ALG), 2048, 65537), // PKCS1.5
         TPM2B_PUBLIC_KEY_RSA(NullVec));
 
-    CreateResponse newSigningKey = m_tpm.Create(
+    m_aikCreate = m_tpm.Create(
         parentHandle,
         TPMS_SENSITIVE_CREATE(),
         templ,
         NullVec,
         vector<TPMS_PCR_SELECTION>());
 
-    auto signKey = m_tpm.Load(parentHandle, newSigningKey.outPrivate, newSigningKey.outPublic);
+    auto signKey = m_tpm.Load(
+        parentHandle, m_aikCreate.outPrivate, m_aikCreate.outPublic);
     return signKey;
 }
 

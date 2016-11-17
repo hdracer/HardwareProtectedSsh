@@ -1,5 +1,3 @@
-#include "tpm2.h"
-
 using namespace TpmCpp;
 
 #ifdef ATTESTATIONLIB_EXPORTS
@@ -17,12 +15,13 @@ public:
     bool CreateAttestationIdentityKey();
     bool CreateSealedUserKey();
     bool SaveSealedUserKey(ByteVec &serializedKey);
-    bool LoadSealedUserKey(const ByteVec &serializedKey);
+    bool LoadSealedUserKey(ByteVec &serializedKey);
     bool CheckUserKeyWhitelist();
     void ShowTpmCapabilities();
     bool SignAndVerifyMessage(const std::string &message);
     bool SignHash(const ByteVec &hashBytes, ByteVec &signatureBytes);
-    ByteVec GetEkPubHash();
+    ByteVec GetEkPubHashBytes();
+    std::string GetUserPubHashHex();
 
 private:
     void SetPlatformAuthenticationValues();
@@ -45,11 +44,15 @@ private:
     std::string m_attestationServerUrl;
     TpmDevice *m_pDevice;
     Tpm2 m_tpm;
+    CreatePrimaryResponse m_ekCreate;
     TPM_HANDLE m_hEk;
     TPMT_PUBLIC m_ekPub;
+    CreatePrimaryResponse m_srkCreate;
     TPM_HANDLE m_hSrk;
+    CreateResponse m_aikCreate;
     TPM_HANDLE m_hAik;
     TPMT_PUBLIC m_aikPub;
+    CreateResponse m_userCreate;
     TPM_HANDLE m_hUser;
     TPMT_PUBLIC m_userPub;
     ByteVec m_decryptedTpmSecret;

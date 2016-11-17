@@ -7,6 +7,7 @@
 #include "stdafx.h"
 #include "libp11platformattestation.h"
 #include "attestationlib.h"
+#include "p11helpers.h"
 
 //
 // Flow macros
@@ -119,17 +120,6 @@ typedef enum
 } P11PA_OPERATION;
 
 //
-// Global state: not thread safe
-//
-
-CK_BBOOL p11pa_initialized = CK_FALSE;
-CK_BBOOL p11pa_session_opened = CK_FALSE;
-CK_ULONG p11pa_session_state = CKS_RO_PUBLIC_SESSION;
-P11PA_OPERATION p11pa_active_operation = P11PA_OPERATION_NONE;
-CK_OBJECT_HANDLE p11pa_find_result = CKR_OBJECT_HANDLE_INVALID;
-CK_FUNCTION_LIST p11pa_functions;
-
-//
 // Key structure
 //
 
@@ -142,11 +132,36 @@ typedef struct _P11PA_KEY
 // Session structure
 //
 
+#define PRIVATEKEY_DEFAULT_HANDLE_VALUE 1
+#define PUBLICKEY_DEFAULT_HANDLE_VALUE 2
 typedef struct _P11PA_SESSION
 {
     PP11PA_KEY pCurrentKey;
     CK_ULONG ulState;
+    CK_BBOOL fOpened;
 } P11PA_SESSION, *PP11PA_SESSION;
+
+//
+// Global state: not thread safe
+//
+
+CK_BBOOL p11pa_initialized = CK_FALSE;
+CK_BBOOL p11pa_session_opened = CK_FALSE;
+CK_ULONG p11pa_session_state = CKS_RO_PUBLIC_SESSION;
+P11PA_OPERATION p11pa_active_operation = P11PA_OPERATION_NONE;
+CK_OBJECT_HANDLE p11pa_find_result = CKR_OBJECT_HANDLE_INVALID;
+
+CK_FUNCTION_LIST g_p11pa_functions;
+P11PA_SESSION g_rgSessions[1];
+
+#define SESSION_DEFAULT_HANDLE_VALUE 1
+
+PP11PA_SESSION _SessionPointerFromHandle(CK_SESSION_HANDLE hSession)
+{
+    if (SESSION_DEFAULT_HANDLE_VALUE == hSession)
+        return g_rgSessions;
+    return 0;
+}
 
 //
 // Begin PKCS#11 module implementation
@@ -160,6 +175,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_Initialize)(CK_VOID_PTR pInitArgs)
     UNREFERENCED_PARAMETER(pInitArgs);
 
     p11pa_initialized = CK_TRUE;
+    memset(g_rgSessions, 0, sizeof(g_rgSessions[0]));
 
     LOG_CALL(__FUNCTION__, 0);
     return CKR_OK;
@@ -212,82 +228,82 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetFunctionList)(CK_FUNCTION_LIST_PTR_PTR ppFunction
     // Set the function pointers at runtime
     //
 
-    p11pa_functions.version.major = 2;
-    p11pa_functions.version.minor = 20;
-    p11pa_functions.C_Initialize = C_Initialize;
-    p11pa_functions.C_Finalize = C_Finalize;
-    p11pa_functions.C_GetInfo = C_GetInfo;
-    p11pa_functions.C_GetFunctionList = C_GetFunctionList;
-    p11pa_functions.C_GetSlotList = C_GetSlotList;
-    p11pa_functions.C_GetSlotInfo = C_GetSlotInfo;
-    p11pa_functions.C_GetTokenInfo = C_GetTokenInfo;
-    p11pa_functions.C_GetMechanismList = C_GetMechanismList;
-    p11pa_functions.C_GetMechanismInfo = C_GetMechanismInfo;
-    p11pa_functions.C_InitToken = C_InitToken;
-    p11pa_functions.C_InitPIN = C_InitPIN;
-    p11pa_functions.C_SetPIN = C_SetPIN;
-    p11pa_functions.C_OpenSession = C_OpenSession;
-    p11pa_functions.C_CloseSession = C_CloseSession;
-    p11pa_functions.C_CloseAllSessions = C_CloseAllSessions;
-    p11pa_functions.C_GetSessionInfo = C_GetSessionInfo;
-    p11pa_functions.C_GetOperationState = C_GetOperationState;
-    p11pa_functions.C_SetOperationState = C_SetOperationState;
-    p11pa_functions.C_Login = C_Login;
-    p11pa_functions.C_Logout = C_Logout;
-    p11pa_functions.C_CreateObject = C_CreateObject;
-    p11pa_functions.C_CopyObject = C_CopyObject;
-    p11pa_functions.C_DestroyObject = C_DestroyObject;
-    p11pa_functions.C_GetObjectSize = C_GetObjectSize;
-    p11pa_functions.C_GetAttributeValue = C_GetAttributeValue;
-    p11pa_functions.C_SetAttributeValue = C_SetAttributeValue;
-    p11pa_functions.C_FindObjectsInit = C_FindObjectsInit;
-    p11pa_functions.C_FindObjects = C_FindObjects;
-    p11pa_functions.C_FindObjectsFinal = C_FindObjectsFinal;
-    p11pa_functions.C_EncryptInit = C_EncryptInit;
-    p11pa_functions.C_Encrypt = C_Encrypt;
-    p11pa_functions.C_EncryptUpdate = C_EncryptUpdate;
-    p11pa_functions.C_EncryptFinal = C_EncryptFinal;
-    p11pa_functions.C_DecryptInit = C_DecryptInit;
-    p11pa_functions.C_Decrypt = C_Decrypt;
-    p11pa_functions.C_DecryptUpdate = C_DecryptUpdate;
-    p11pa_functions.C_DecryptFinal = C_DecryptFinal;
-    p11pa_functions.C_DigestInit = C_DigestInit;
-    p11pa_functions.C_Digest = C_Digest;
-    p11pa_functions.C_DigestUpdate = C_DigestUpdate;
-    p11pa_functions.C_DigestKey = C_DigestKey;
-    p11pa_functions.C_DigestFinal = C_DigestFinal;
-    p11pa_functions.C_SignInit = C_SignInit;
-    p11pa_functions.C_Sign = C_Sign;
-    p11pa_functions.C_SignUpdate = C_SignUpdate;
-    p11pa_functions.C_SignFinal = C_SignFinal;
-    p11pa_functions.C_SignRecoverInit = C_SignRecoverInit;
-    p11pa_functions.C_SignRecover = C_SignRecover;
-    p11pa_functions.C_VerifyInit = C_VerifyInit;
-    p11pa_functions.C_Verify = C_Verify;
-    p11pa_functions.C_VerifyUpdate = C_VerifyUpdate;
-    p11pa_functions.C_VerifyFinal = C_VerifyFinal;
-    p11pa_functions.C_VerifyRecoverInit = C_VerifyRecoverInit;
-    p11pa_functions.C_VerifyRecover = C_VerifyRecover;
-    p11pa_functions.C_DigestEncryptUpdate = C_DigestEncryptUpdate;
-    p11pa_functions.C_DecryptDigestUpdate = C_DecryptDigestUpdate;
-    p11pa_functions.C_SignEncryptUpdate = C_SignEncryptUpdate;
-    p11pa_functions.C_DecryptVerifyUpdate = C_DecryptVerifyUpdate;
-    p11pa_functions.C_GenerateKey = C_GenerateKey;
-    p11pa_functions.C_GenerateKeyPair = C_GenerateKeyPair;
-    p11pa_functions.C_WrapKey = C_WrapKey;
-    p11pa_functions.C_UnwrapKey = C_UnwrapKey;
-    p11pa_functions.C_DeriveKey = C_DeriveKey;
-    p11pa_functions.C_SeedRandom = C_SeedRandom;
-    p11pa_functions.C_GenerateRandom = C_GenerateRandom;
-    p11pa_functions.C_GetFunctionStatus = C_GetFunctionStatus;
-    p11pa_functions.C_CancelFunction = C_CancelFunction;
-    p11pa_functions.C_WaitForSlotEvent = C_WaitForSlotEvent;
+    g_p11pa_functions.version.major = 2;
+    g_p11pa_functions.version.minor = 20;
+    g_p11pa_functions.C_Initialize = C_Initialize;
+    g_p11pa_functions.C_Finalize = C_Finalize;
+    g_p11pa_functions.C_GetInfo = C_GetInfo;
+    g_p11pa_functions.C_GetFunctionList = C_GetFunctionList;
+    g_p11pa_functions.C_GetSlotList = C_GetSlotList;
+    g_p11pa_functions.C_GetSlotInfo = C_GetSlotInfo;
+    g_p11pa_functions.C_GetTokenInfo = C_GetTokenInfo;
+    g_p11pa_functions.C_GetMechanismList = C_GetMechanismList;
+    g_p11pa_functions.C_GetMechanismInfo = C_GetMechanismInfo;
+    g_p11pa_functions.C_InitToken = C_InitToken;
+    g_p11pa_functions.C_InitPIN = C_InitPIN;
+    g_p11pa_functions.C_SetPIN = C_SetPIN;
+    g_p11pa_functions.C_OpenSession = C_OpenSession;
+    g_p11pa_functions.C_CloseSession = C_CloseSession;
+    g_p11pa_functions.C_CloseAllSessions = C_CloseAllSessions;
+    g_p11pa_functions.C_GetSessionInfo = C_GetSessionInfo;
+    g_p11pa_functions.C_GetOperationState = C_GetOperationState;
+    g_p11pa_functions.C_SetOperationState = C_SetOperationState;
+    g_p11pa_functions.C_Login = C_Login;
+    g_p11pa_functions.C_Logout = C_Logout;
+    g_p11pa_functions.C_CreateObject = C_CreateObject;
+    g_p11pa_functions.C_CopyObject = C_CopyObject;
+    g_p11pa_functions.C_DestroyObject = C_DestroyObject;
+    g_p11pa_functions.C_GetObjectSize = C_GetObjectSize;
+    g_p11pa_functions.C_GetAttributeValue = C_GetAttributeValue;
+    g_p11pa_functions.C_SetAttributeValue = C_SetAttributeValue;
+    g_p11pa_functions.C_FindObjectsInit = C_FindObjectsInit;
+    g_p11pa_functions.C_FindObjects = C_FindObjects;
+    g_p11pa_functions.C_FindObjectsFinal = C_FindObjectsFinal;
+    g_p11pa_functions.C_EncryptInit = C_EncryptInit;
+    g_p11pa_functions.C_Encrypt = C_Encrypt;
+    g_p11pa_functions.C_EncryptUpdate = C_EncryptUpdate;
+    g_p11pa_functions.C_EncryptFinal = C_EncryptFinal;
+    g_p11pa_functions.C_DecryptInit = C_DecryptInit;
+    g_p11pa_functions.C_Decrypt = C_Decrypt;
+    g_p11pa_functions.C_DecryptUpdate = C_DecryptUpdate;
+    g_p11pa_functions.C_DecryptFinal = C_DecryptFinal;
+    g_p11pa_functions.C_DigestInit = C_DigestInit;
+    g_p11pa_functions.C_Digest = C_Digest;
+    g_p11pa_functions.C_DigestUpdate = C_DigestUpdate;
+    g_p11pa_functions.C_DigestKey = C_DigestKey;
+    g_p11pa_functions.C_DigestFinal = C_DigestFinal;
+    g_p11pa_functions.C_SignInit = C_SignInit;
+    g_p11pa_functions.C_Sign = C_Sign;
+    g_p11pa_functions.C_SignUpdate = C_SignUpdate;
+    g_p11pa_functions.C_SignFinal = C_SignFinal;
+    g_p11pa_functions.C_SignRecoverInit = C_SignRecoverInit;
+    g_p11pa_functions.C_SignRecover = C_SignRecover;
+    g_p11pa_functions.C_VerifyInit = C_VerifyInit;
+    g_p11pa_functions.C_Verify = C_Verify;
+    g_p11pa_functions.C_VerifyUpdate = C_VerifyUpdate;
+    g_p11pa_functions.C_VerifyFinal = C_VerifyFinal;
+    g_p11pa_functions.C_VerifyRecoverInit = C_VerifyRecoverInit;
+    g_p11pa_functions.C_VerifyRecover = C_VerifyRecover;
+    g_p11pa_functions.C_DigestEncryptUpdate = C_DigestEncryptUpdate;
+    g_p11pa_functions.C_DecryptDigestUpdate = C_DecryptDigestUpdate;
+    g_p11pa_functions.C_SignEncryptUpdate = C_SignEncryptUpdate;
+    g_p11pa_functions.C_DecryptVerifyUpdate = C_DecryptVerifyUpdate;
+    g_p11pa_functions.C_GenerateKey = C_GenerateKey;
+    g_p11pa_functions.C_GenerateKeyPair = C_GenerateKeyPair;
+    g_p11pa_functions.C_WrapKey = C_WrapKey;
+    g_p11pa_functions.C_UnwrapKey = C_UnwrapKey;
+    g_p11pa_functions.C_DeriveKey = C_DeriveKey;
+    g_p11pa_functions.C_SeedRandom = C_SeedRandom;
+    g_p11pa_functions.C_GenerateRandom = C_GenerateRandom;
+    g_p11pa_functions.C_GetFunctionStatus = C_GetFunctionStatus;
+    g_p11pa_functions.C_CancelFunction = C_CancelFunction;
+    g_p11pa_functions.C_WaitForSlotEvent = C_WaitForSlotEvent;
 
     //
     // Return the populated structure
     //
 
-    *ppFunctionList = &p11pa_functions;
+    *ppFunctionList = &g_p11pa_functions;
     
     LOG_CALL(__FUNCTION__, 0);
     return CKR_OK;
@@ -368,9 +384,9 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetTokenInfo)(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR p
     memset(pInfo->serialNumber, ' ', sizeof(pInfo->serialNumber));
     memcpy(pInfo->serialNumber, P11PA_TOKEN_INFO_SERIAL_NUMBER, strlen(P11PA_TOKEN_INFO_SERIAL_NUMBER));
     pInfo->flags = CKF_RNG | CKF_LOGIN_REQUIRED | CKF_USER_PIN_INITIALIZED | CKF_TOKEN_INITIALIZED;
-    pInfo->ulMaxSessionCount = CK_EFFECTIVELY_INFINITE;
+    pInfo->ulMaxSessionCount = sizeof(g_rgSessions) / sizeof(g_rgSessions[0]);
     pInfo->ulSessionCount = (CK_TRUE == p11pa_session_opened) ? 1 : 0;
-    pInfo->ulMaxRwSessionCount = CK_EFFECTIVELY_INFINITE;
+    pInfo->ulMaxRwSessionCount = sizeof(g_rgSessions) / sizeof(g_rgSessions[0]);
     pInfo->ulRwSessionCount = ((CK_TRUE == p11pa_session_opened) && ((CKS_RO_PUBLIC_SESSION != p11pa_session_state) || (CKS_RO_USER_FUNCTIONS != p11pa_session_state))) ? 1 : 0;
     pInfo->ulMaxPinLen = P11PA_TOKEN_INFO_MAX_PIN_LEN;
     pInfo->ulMinPinLen = P11PA_TOKEN_INFO_MIN_PIN_LEN;
@@ -585,7 +601,8 @@ CK_DEFINE_FUNCTION(CK_RV, C_OpenSession)(
     CK_SESSION_HANDLE_PTR phSession)
 {
     CK_RV result = CKR_OK;
-    PP11PA_SESSION pSession = 0;
+    PP11PA_SESSION pSession = _SessionPointerFromHandle(
+        SESSION_DEFAULT_HANDLE_VALUE);
 
     UNREFERENCED_PARAMETER(pApplication);
     UNREFERENCED_PARAMETER(Notify);
@@ -598,7 +615,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_OpenSession)(
     {
         CHECK_CKR(CKR_CRYPTOKI_NOT_INITIALIZED);
     }
-    if (CK_TRUE == p11pa_session_opened)
+    if (CK_TRUE == pSession->fOpened)
     {
         CHECK_CKR(CKR_SESSION_COUNT);
     }
@@ -616,25 +633,21 @@ CK_DEFINE_FUNCTION(CK_RV, C_OpenSession)(
     }
 
     //
-    // Allocate the session
+    // Assign the session
     //
 
-    CHECK_ALLOC(pSession = (PP11PA_SESSION)malloc(sizeof(P11PA_SESSION)));
     pSession->ulState = 
         (flags & CKF_RW_SESSION) ? CKS_RW_PUBLIC_SESSION : CKS_RO_PUBLIC_SESSION;
-
-    p11pa_session_opened = CK_TRUE;
+    pSession->fOpened = CK_TRUE;
 
     //
     // Return the session
     //
 
-    *phSession = (CK_SESSION_HANDLE) pSession;
+    *phSession = SESSION_DEFAULT_HANDLE_VALUE;
     pSession = 0;
 
 out:
-    if (0 != pSession)
-        free(pSession);
     LOG_CALL(__FUNCTION__, result);
     return result;
 }
@@ -643,6 +656,8 @@ out:
 CK_DEFINE_FUNCTION(CK_RV, C_CloseSession)(CK_SESSION_HANDLE hSession)
 {
     CK_RV result = CKR_OK;
+    PP11PA_SESSION pSession = _SessionPointerFromHandle(
+        hSession);
 
     //
     // Check parameters
@@ -661,9 +676,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_CloseSession)(CK_SESSION_HANDLE hSession)
     // Tear down the session
     //
 
-    free((void *) hSession);
-    p11pa_session_opened = CK_FALSE;
-    p11pa_session_state = CKS_RO_PUBLIC_SESSION;
+    pSession->fOpened = CK_FALSE;
     p11pa_active_operation = P11PA_OPERATION_NONE;
 
 out:
@@ -1797,7 +1810,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_SignInit)(
     CK_OBJECT_HANDLE hKey)
 {
     CK_RV result = CKR_OK;
-    PP11PA_SESSION pSession = (PP11PA_SESSION)hSession;
+    PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
 
     //
     // Check parameters
@@ -1820,7 +1833,8 @@ CK_DEFINE_FUNCTION(CK_RV, C_SignInit)(
     {
         CHECK_CKR(CKR_ARGUMENTS_BAD);
     }
-    if (CKM_RSA_PKCS != pMechanism->mechanism && CKM_SHA1_RSA_PKCS != pMechanism->mechanism)
+    if (CKM_RSA_PKCS != pMechanism->mechanism && 
+        CKM_SHA1_RSA_PKCS != pMechanism->mechanism)
     {
         CHECK_CKR(CKR_MECHANISM_INVALID);
     }
@@ -1837,7 +1851,6 @@ CK_DEFINE_FUNCTION(CK_RV, C_SignInit)(
     // Update the session
     //
 
-    pSession->pCurrentKey = (PP11PA_KEY)hKey;
     p11pa_active_operation = P11PA_OPERATION_SIGN;
 
 out:
@@ -1849,7 +1862,7 @@ out:
 CK_DEFINE_FUNCTION(CK_RV, C_Sign)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
     CK_RV result = CKR_OK;
-    PP11PA_SESSION pSession = (PP11PA_SESSION)hSession;
+    PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
     ByteVec signatureBytes;
 
     //
@@ -1912,7 +1925,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_Sign)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData,
         }
     }
 
-    *pulSignatureLen = signatureBytes.size();
+    *pulSignatureLen = (CK_ULONG) signatureBytes.size();
 
 out:
     LOG_CALL(__FUNCTION__, result);
@@ -2497,7 +2510,12 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(
 {
     CK_RV result = CKR_OK;
     CK_ULONG i = 0;
+    PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
     PP11PA_KEY pKey = 0;
+    ByteVec serializedKey;
+    std::string pubKeyHash;
+    std::string userKeyPath;
+    std::vector<string> userKeyFiles;
 
     //
     // Parameter checking
@@ -2505,7 +2523,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(
 
     if (CK_FALSE == p11pa_initialized)
         return CKR_CRYPTOKI_NOT_INITIALIZED;
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
+    if (0 == hSession)
         return CKR_SESSION_HANDLE_INVALID;
     if (NULL == pMechanism)
         return CKR_ARGUMENTS_BAD;
@@ -2513,14 +2531,6 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(
         return CKR_MECHANISM_INVALID;
     if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
         return CKR_MECHANISM_PARAM_INVALID;
-    if (NULL == pPublicKeyTemplate)
-        return CKR_ARGUMENTS_BAD;
-    if (0 >= ulPublicKeyAttributeCount)
-        return CKR_ARGUMENTS_BAD;
-    if (NULL == pPrivateKeyTemplate)
-        return CKR_ARGUMENTS_BAD;
-    if (0 >= ulPrivateKeyAttributeCount)
-        return CKR_ARGUMENTS_BAD;
     if (NULL == phPublicKey)
         return CKR_ARGUMENTS_BAD;
     if (NULL == phPrivateKey)
@@ -2559,41 +2569,81 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(
         std::string("https://strongnetsvc.jwsecure.com"));
 
     //
-    // Attest
+    // Check for an existing key
+    //
+    // TODO - this is a temporary optimization. This check technically 
+    // belongs in the GetObject path. The spec is such that GenKeyPair should 
+    // always create a new set. 
     //
 
-    if (false == pKey->pAttestationLib->CreateAttestationIdentityKey())
+    if (true == PhlpEnumerateUserKeyFiles(userKeyFiles))
     {
-        CHECK_CKR(CKR_FUNCTION_FAILED);
+        //
+        // Try working with the first key
+        //
+
+        if (false == PhlpReadFile(userKeyFiles[0], serializedKey))
+        {
+            CHECK_CKR(CKR_FUNCTION_FAILED);
+        }
+
+        if (false == pKey->pAttestationLib->LoadSealedUserKey(serializedKey))
+        {
+            CHECK_CKR(CKR_FUNCTION_FAILED);
+        }
     }
-
-    //
-    // Create the key
-    //
-
-    if (false == pKey->pAttestationLib->CreateSealedUserKey())
+    else
     {
-        CHECK_CKR(CKR_FUNCTION_FAILED);
+        //
+        // Attest
+        //
+
+        if (false == pKey->pAttestationLib->CreateAttestationIdentityKey())
+        {
+            CHECK_CKR(CKR_FUNCTION_FAILED);
+        }
+
+        //
+        // Create the key
+        //
+
+        if (false == pKey->pAttestationLib->CreateSealedUserKey())
+        {
+            CHECK_CKR(CKR_FUNCTION_FAILED);
+        }
+
+        // 
+        // Serialize the key
+        //
+
+        if (false == pKey->pAttestationLib->SaveSealedUserKey(serializedKey))
+        {
+            CHECK_CKR(CKR_FUNCTION_FAILED);
+        }
+
+        //
+        // Save the key
+        //
+
+        pubKeyHash = pKey->pAttestationLib->GetUserPubHashHex();
+        if (false == PhlpGetUserKeyPath(pubKeyHash, userKeyPath))
+        {
+            CHECK_CKR(CKR_FUNCTION_FAILED);
+        }
+
+        if (false == PhlpWriteFile(userKeyPath, serializedKey))
+        {
+            CHECK_CKR(CKR_FUNCTION_FAILED);
+        }
     }
-
-    // 
-    // Serialize the key
-    //
-
-    // TODO
-
-    //
-    // Save the key
-    //
-
-    // TODO
 
     //
     // Return the key handles
     //
 
-    *phPublicKey = (CK_OBJECT_HANDLE) pKey;
-    *phPrivateKey = (CK_OBJECT_HANDLE) pKey;
+    *phPublicKey = PUBLICKEY_DEFAULT_HANDLE_VALUE;
+    *phPrivateKey = PRIVATEKEY_DEFAULT_HANDLE_VALUE;
+    pSession->pCurrentKey = pKey;
     pKey = 0;
 
 out:
@@ -2611,223 +2661,65 @@ out:
 
 CK_DEFINE_FUNCTION(CK_RV, C_WrapKey)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hWrappingKey, CK_OBJECT_HANDLE hKey, CK_BYTE_PTR pWrappedKey, CK_ULONG_PTR pulWrappedKeyLen)
 {
-    CK_BYTE wrappedKey[10] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09 };
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pMechanism)
-        return CKR_ARGUMENTS_BAD;
-
-    if (CKM_RSA_PKCS != pMechanism->mechanism)
-        return CKR_MECHANISM_INVALID;
-
-    if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
-        return CKR_MECHANISM_PARAM_INVALID;
-
-    if (P11PA_OBJECT_HANDLE_PUBLIC_KEY != hWrappingKey)
-        return CKR_KEY_HANDLE_INVALID;
-
-    if (P11PA_OBJECT_HANDLE_SECRET_KEY != hKey)
-        return CKR_KEY_HANDLE_INVALID;
-
-    if (NULL != pWrappedKey)
-    {
-        if (sizeof(wrappedKey) > *pulWrappedKeyLen)
-            return CKR_BUFFER_TOO_SMALL;
-        else
-            memcpy(pWrappedKey, wrappedKey, sizeof(wrappedKey));
-    }
-
-    *pulWrappedKeyLen = sizeof(wrappedKey);
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_UnwrapKey)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hUnwrappingKey, CK_BYTE_PTR pWrappedKey, CK_ULONG ulWrappedKeyLen, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulAttributeCount, CK_OBJECT_HANDLE_PTR phKey)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pMechanism)
-        return CKR_ARGUMENTS_BAD;
-
-    if (CKM_RSA_PKCS != pMechanism->mechanism)
-        return CKR_MECHANISM_INVALID;
-
-    if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
-        return CKR_MECHANISM_PARAM_INVALID;
-
-    if (P11PA_OBJECT_HANDLE_PRIVATE_KEY != hUnwrappingKey)
-        return CKR_KEY_HANDLE_INVALID;
-
-    if (NULL == pWrappedKey)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulWrappedKeyLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pTemplate)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulAttributeCount)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == phKey)
-        return CKR_ARGUMENTS_BAD;
-
-    for (i = 0; i < ulAttributeCount; i++)
-    {
-        if (NULL == pTemplate[i].pValue)
-            return CKR_ATTRIBUTE_VALUE_INVALID;
-
-        if (0 >= pTemplate[i].ulValueLen)
-            return CKR_ATTRIBUTE_VALUE_INVALID;
-    }
-
-    *phKey = P11PA_OBJECT_HANDLE_SECRET_KEY;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_DeriveKey)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hBaseKey, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulAttributeCount, CK_OBJECT_HANDLE_PTR phKey)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pMechanism)
-        return CKR_ARGUMENTS_BAD;
-
-    if (CKM_XOR_BASE_AND_DATA != pMechanism->mechanism)
-        return CKR_MECHANISM_INVALID;
-
-    if ((NULL == pMechanism->pParameter) || (sizeof(CK_KEY_DERIVATION_STRING_DATA) != pMechanism->ulParameterLen))
-        return CKR_MECHANISM_PARAM_INVALID;
-
-    if (P11PA_OBJECT_HANDLE_SECRET_KEY != hBaseKey)
-        return CKR_OBJECT_HANDLE_INVALID;
-
-    if (NULL == phKey)
-        return CKR_ARGUMENTS_BAD;
-
-    if ((NULL != pTemplate) && (0 >= ulAttributeCount))
-    {
-        for (i = 0; i < ulAttributeCount; i++)
-        {
-            if (NULL == pTemplate[i].pValue)
-                return CKR_ATTRIBUTE_VALUE_INVALID;
-
-            if (0 >= pTemplate[i].ulValueLen)
-                return CKR_ATTRIBUTE_VALUE_INVALID;
-        }
-    }
-
-    *phKey = P11PA_OBJECT_HANDLE_SECRET_KEY;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_SeedRandom)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSeed, CK_ULONG ulSeedLen)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pSeed)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulSeedLen)
-        return CKR_ARGUMENTS_BAD;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_GenerateRandom)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR RandomData, CK_ULONG ulRandomLen)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == RandomData)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulRandomLen)
-        return CKR_ARGUMENTS_BAD;
-
-    memset(RandomData, 1, ulRandomLen);
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_GetFunctionStatus)(CK_SESSION_HANDLE hSession)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_FUNCTION_NOT_PARALLEL;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_CancelFunction)(CK_SESSION_HANDLE hSession)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_FUNCTION_NOT_PARALLEL;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_WaitForSlotEvent)(CK_FLAGS flags, CK_SLOT_ID_PTR pSlot, CK_VOID_PTR pReserved)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((0 != flags) && (CKF_DONT_BLOCK != flags))
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pSlot)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pReserved)
-        return CKR_ARGUMENTS_BAD;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_NO_EVENT;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
@@ -2915,55 +2807,15 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetUnmanagedStructSizeList)(CK_ULONG_PTR pSizeList, 
 
 CK_DEFINE_FUNCTION(CK_RV, C_EjectToken)(CK_SLOT_ID slotID)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_SLOT_ID != slotID)
-        return CKR_SLOT_ID_INVALID;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_InteractiveLogin)(CK_SESSION_HANDLE hSession)
 {
-    CK_RV rv = CKR_OK;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    switch (p11pa_session_state)
-    {
-    case CKS_RO_PUBLIC_SESSION:
-
-        p11pa_session_state = CKS_RO_USER_FUNCTIONS;
-
-        break;
-
-    case CKS_RO_USER_FUNCTIONS:
-    case CKS_RW_USER_FUNCTIONS:
-
-        rv = CKR_USER_ALREADY_LOGGED_IN;
-
-        break;
-
-    case CKS_RW_PUBLIC_SESSION:
-
-        p11pa_session_state = CKS_RW_USER_FUNCTIONS;
-
-        break;
-
-    case CKS_RW_SO_FUNCTIONS:
-
-        rv = CKR_USER_ANOTHER_ALREADY_LOGGED_IN;
-
-        break;
-    }
-
-    LOG_CALL(__FUNCTION__, 0);
-    return rv;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
