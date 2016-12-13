@@ -1,8 +1,10 @@
+TPM_DIR=../TSS.MSR.CPP/Src
+ATTESTATION_DIR=../AttestationLib
 SRC_DIR=../libp11platformattestation
 
 CC= gcc
 ARCH_FLAGS= -m64
-CFLAGS= $(ARCH_FLAGS) -Wall -Wextra -Werror -g -I$(SRC_DIR)
+CFLAGS= $(ARCH_FLAGS) -Wall -Wno-extra -Werror -Wno-unused-parameter -g -std=c++11 -I$(SRC_DIR) -I$(TPM_DIR) -I$(ATTESTATION_DIR)
 LIBNAME=libp11platformattestation-x64.so
 
 all: libp11platformattestation.o

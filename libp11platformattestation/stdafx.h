@@ -8,7 +8,6 @@
 #include <map>
 #include <iostream>
 #include <iomanip>
-#include <filesystem>
 #include <fstream>
 
 #ifndef __linux__
@@ -20,11 +19,13 @@
 #include <ws2tcpip.h>
 #include <tchar.h>
 #include <wincrypt.h>
+#include <filesystem>
 #else
 // Linux-only
 #include <arpa/inet.h>
 #include <assert.h>
 #include <string.h>
+#include <typeinfo>
 #define OutputDebugStringA(x) printf("%s", x)
 #define MultiByteToWideChar(a,b,c,d,e,f) assert(d<=f);mbtowc(e,c,d);
 #define UNREFERENCED_PARAMETER(x) (void)(x)

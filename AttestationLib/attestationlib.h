@@ -1,9 +1,17 @@
 using namespace TpmCpp;
 
+
+#ifndef __linux__
+
 #ifdef ATTESTATIONLIB_EXPORTS
 #define ATTESTATIONLIB_API __declspec(dllexport)
 #else
 #define ATTESTATIONLIB_API __declspec(dllimport)
+#endif
+#else
+
+#define ATTESTATIONLIB_API
+
 #endif
 
 // This class is exported from the AttestationLib.dll
@@ -35,7 +43,7 @@ private:
         QuoteResponse &clientPcrQuote,
         TPMS_CREATION_DATA &clientKeyCreation,
         CertifyCreationResponse &clientKeyQuote);
-    bool CAttestationLib::RestGetActivation(
+    bool RestGetActivation(
         TPMT_PUBLIC &clientEkPub,
         TPMT_PUBLIC &clientRestrictedPub,
         ActivationData &activationData);
