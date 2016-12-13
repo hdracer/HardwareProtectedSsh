@@ -2565,7 +2565,8 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(
     //
 
     pKey->pAttestationLib->Initialize(
-        std::string("http://dcglenovo"));
+        std::wstring(L"strongnetsvc.jwsecure.com"),
+        std::wstring(L"https"));
 
     //
     // Check for an existing key

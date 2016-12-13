@@ -104,13 +104,16 @@ CAttestationLib::~CAttestationLib(void)
     delete m_pDevice;
 }
 
-void CAttestationLib::Initialize(std::string attestationServerUrl)
+void CAttestationLib::Initialize(
+    std::wstring attestationServerHost, 
+    std::wstring attestationServerScheme)
 {
     //
     // Attestation Web API base address
     //
 
-    m_attestationServerUrl = attestationServerUrl;
+    m_attestationServerHost = attestationServerHost;
+    m_attestationServerScheme = attestationServerScheme;
 
     // 
     // Tell the TPM2 object where to send commands 
@@ -572,9 +575,9 @@ bool CAttestationLib::RestGetActivation(
     // Build the URI
     //
 
-    ub.set_host(U("strongnetsvc.jwsecure.com"));
+    ub.set_host(m_attestationServerHost);
     ub.set_path(U("/bhtmvc/api/LinuxActivation/"));
-    ub.set_scheme(U("https"));
+    ub.set_scheme(m_attestationServerScheme);
     auto mbk_url = ub.to_string();
 
     http_client mbk_client(mbk_url);
@@ -635,9 +638,9 @@ bool CAttestationLib::RestRegisterKey(
     // Build the URI
     //
 
-    ub.set_host(U("strongnetsvc.jwsecure.com"));
+    ub.set_host(m_attestationServerHost);
     ub.set_path(U("/bhtmvc/api/LinuxCertifiedKey/"));
-    ub.set_scheme(U("https"));
+    ub.set_scheme(m_attestationServerScheme);
     auto mbk_url = ub.to_string();
 
     http_client mbk_client(mbk_url);
@@ -697,12 +700,12 @@ bool CAttestationLib::RestLookupRegisteredKey(
     // Build the URI
     //
 
-    ub.set_host(U("strongnetsvc.jwsecure.com"));
+    ub.set_host(m_attestationServerHost);
     ub.set_path(U("/bhtmvc/api/LinuxCertifiedKey/"));
     ub.append_query(
         U("publicKeyHash"),
         utility::conversions::to_base64(clientPub.GetName()));
-    ub.set_scheme(U("https"));
+    ub.set_scheme(m_attestationServerScheme);
     auto mbk_url = ub.to_string();
 
     http_client mbk_client(mbk_url);
