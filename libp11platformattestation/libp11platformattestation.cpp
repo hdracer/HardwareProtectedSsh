@@ -2565,7 +2565,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(
     //
 
     pKey->pAttestationLib->Initialize(
-        std::string("https://strongnetsvc.jwsecure.com"));
+        std::string("http://dcglenovo"));
 
     //
     // Check for an existing key
@@ -2575,7 +2575,8 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(
     // always create a new set. 
     //
 
-    if (true == PhlpEnumerateUserKeyFiles(userKeyFiles))
+    if (true == PhlpEnumerateUserKeyFiles(userKeyFiles) &&
+        0 < userKeyFiles.size())
     {
         //
         // Try working with the first key
