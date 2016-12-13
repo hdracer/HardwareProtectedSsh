@@ -1810,7 +1810,6 @@ CK_DEFINE_FUNCTION(CK_RV, C_SignInit)(
     CK_OBJECT_HANDLE hKey)
 {
     CK_RV result = CKR_OK;
-    PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
 
     //
     // Check parameters
