@@ -5,8 +5,6 @@
 */
 
 #include "stdafx.h"
-//#include "attestationlib.h"
-//#include "pam_platform_attestation.h"
 
 //
 // Flow macros
@@ -72,75 +70,6 @@ void _OutputDbgStr(
     }                                                                       \
 }        
 
-/*
-//
-// PCR attestation and AIK activation
-//
-void TestPlatformAttestation()
-{
-    CAttestationLib attestationLib;
-
-    //
-    // Initialize attestation helper class
-    //
-
-    cout << "Initializing test of remote platform attestation using local host TPM 2.0 device..." << endl;
-    attestationLib.Initialize(std::string("https://strongnetsvc.jwsecure.com"));
-
-    //
-    // List certain TPM capabilities for lab testing
-    //
-
-    //attestationLib.ShowTpmCapabilities();
-
-    //
-    // Establish an AIK
-    //
-
-    if (false == attestationLib.CreateAttestationIdentityKey())
-    {
-        cout << "Failed to create an Attestation Identity Key" << endl;
-        cout << "Confirm that this Endorsement Key hash is trusted by the Attestation Server: " << endl;
-        cout << " " << attestationLib.GetEkPubHashBytes() << endl;
-        return;
-    }
-    cout << "Successfully established an Attestation Identity Key with the Attestation Server" << endl;
-
-    //
-    // Create a sealed user key
-    //
-
-    if (false == attestationLib.CreateSealedUserKey())
-    {
-        cout << "Failed to create a sealed TPM user key" << endl;
-        return;
-    }
-    cout << "Successfully created a sealed user key" << endl;
-
-    //
-    // Check the user key with the AS
-    //
-
-    if (false == attestationLib.CheckUserKeyWhitelist())
-    {
-        cout << "Failed to verify TPM user key with the Attestation Server whitelist" << endl;
-        return;
-    }
-    cout << "Successfully checked TPM user key with Attestation Server whitelist" << endl;
-
-    //
-    // Sign and verify
-    //
-
-    if (false == attestationLib.SignAndVerifyMessage(std::string("This is a test message")))
-    {
-        cout << "Failed to sign and verify a message with the TPM user key" << endl;
-        return;
-    }
-    cout << "Successfully signed and verified and message with the TPM user key " << endl;
-}
-*/
-
 void TestPaPkcs11()
 {
     CK_C_GetFunctionList pfnCkGetFunctionList = 0;
@@ -153,6 +82,9 @@ void TestPaPkcs11()
     CK_MECHANISM Mechanism = { 0 };
     CK_OBJECT_HANDLE hPublicKey = 0;
     CK_OBJECT_HANDLE hPrivateKey = 0;
+    CK_BYTE rgbHash[20];
+    CK_BYTE *pbSignature = 0;
+    CK_ULONG cbSignature = 0;
 
     //
     // Load the library
@@ -228,7 +160,40 @@ void TestPaPkcs11()
         &hPublicKey,
         &hPrivateKey));
 
+    //
+    // Sign a hash
+    //
+
+    Mechanism.mechanism = CKM_RSA_PKCS;
+    CHECK_CKR(pCkFunctionList->C_SignInit(
+        hSession,
+        &Mechanism,
+        hPrivateKey));
+
+    CHECK_CKR(pCkFunctionList->C_Sign(
+        hSession,
+        rgbHash,
+        sizeof(rgbHash),
+        0,
+        &cbSignature));
+
+    CHECK_ALLOC(pbSignature = (CK_BYTE_PTR) malloc(cbSignature));
+
+    CHECK_CKR(pCkFunctionList->C_Sign(
+        hSession,
+        rgbHash,
+        sizeof(rgbHash),
+        pbSignature,
+        &cbSignature));
+
+    //
+    // Verify the signature
+    //
+    
+    // TODO
 out:
+    if (0 != pbSignature)
+        free(pbSignature);
 #ifndef __linux__    
     if (0 != hMod)
         FreeLibrary(hMod);

@@ -26,11 +26,64 @@ using namespace web::http::experimental::listener;
 //
 typedef struct _ATTESTED_TPM_KEY
 {
-    unsigned int cbEndorsementKey;
-    unsigned int cbStorageRootKey;
+    unsigned int version;
+    //unsigned int cbEndorsementKey;
+    //unsigned int cbStorageRootKey;
     unsigned int cbAttestationIdentityKey;
     unsigned int cbAttestedUserKey;
 } ATTESTED_TPM_KEY, *PATTESTED_TPM_KEY;
+
+//
+// Helper routines
+//
+
+std::string _bytesToHex(ByteVec &data)
+{
+    std::stringstream ss;
+    ss << std::hex;
+    for (int i = 0; i<data.size(); ++i)
+        ss << std::setw(2) << std::setfill('0') << (int)data[i];
+    return ss.str();
+}
+
+std::wstring _getDeviceName()
+{
+    wchar_t *wszName = 0;
+    size_t cchName = 0;
+    std::wstring strName;
+
+    //
+    // Find a device name
+    //
+
+    _wdupenv_s(&wszName, 0, U("COMPUTERNAME"));
+    if (0 == wszName)
+    {
+        _wdupenv_s(&wszName, 0, U("HOSTNAME"));
+    }
+    if (0 == wszName)
+    {
+        return std::wstring(U(""));
+    }
+
+    //
+    // Return the string to be used
+    //
+
+    strName.assign(wszName);
+    free(wszName);
+    return strName;
+}
+
+std::wstring _getSystemVersion()
+{
+#ifndef __linux__
+    return std::wstring(U("Windows"));
+#else
+    return std::wstring(U("Linux"));
+#endif
+}
+
 
 //
 // Class implementation
@@ -98,18 +151,19 @@ bool CAttestationLib::CreateAttestationIdentityKey()
     // Read out the manufacturer Endorsement Key (EK)
     //
 
-    m_hEk = MakeEndorsementKey();
-    auto ekPubX = m_tpm.ReadPublic(m_hEk);
-    m_ekPub = ekPubX.outPublic;
+    MakeEndorsementKey();
+    cout << "EK name: " << _bytesToHex(m_ekPub.GetName()) << endl;
 
     //
     // Create a restricted key in the storage hierarchy
     //
 
-    m_hSrk = MakeStoragePrimary();
+    MakeStoragePrimary();
+    cout << "SRK name: " << _bytesToHex(m_srkPub.GetName()) << endl;
     m_hAik = MakeChildSigningKey(m_hSrk, true);
     auto restrictedPubX = m_tpm.ReadPublic(m_hAik);
     m_aikPub = restrictedPubX.outPublic;
+    cout << "AIK name: " << _bytesToHex(m_aikPub.GetName()) << endl;
 
     //
     // For an example of pulling EK manufacturer certificates from the 
@@ -242,13 +296,13 @@ bool CAttestationLib::SaveSealedUserKey(ByteVec &serializedKey)
     // Serialize the EK
     //
 
-    ByteVec ekBytes = m_ekCreate.ToBuf();
+    //ByteVec ekBytes = m_ekCreate.ToBuf();
 
     //
     // Serialize the SRK
     //
 
-    ByteVec srkBytes = m_srkCreate.ToBuf();
+    //ByteVec srkBytes = m_srkCreate.ToBuf();
 
     //
     // Serialize the AIK
@@ -266,8 +320,8 @@ bool CAttestationLib::SaveSealedUserKey(ByteVec &serializedKey)
     // Populate the key header
     //
     
-    FlatKey.cbEndorsementKey = (unsigned int) ekBytes.size();
-    FlatKey.cbStorageRootKey = (unsigned int) srkBytes.size();
+    //FlatKey.cbEndorsementKey = (unsigned int) ekBytes.size();
+    //FlatKey.cbStorageRootKey = (unsigned int) srkBytes.size();
     FlatKey.cbAttestationIdentityKey = (unsigned int) aikBytes.size();
     FlatKey.cbAttestedUserKey = (unsigned int) userBytes.size();
 
@@ -282,6 +336,7 @@ bool CAttestationLib::SaveSealedUserKey(ByteVec &serializedKey)
         ((unsigned char *) &FlatKey) + sizeof(FlatKey));
     cbFlatKey += (unsigned int) sizeof(FlatKey);
 
+    /*
     it = serializedKey.begin();
     serializedKey.insert(
         it + cbFlatKey,
@@ -295,6 +350,7 @@ bool CAttestationLib::SaveSealedUserKey(ByteVec &serializedKey)
         srkBytes.begin(),
         srkBytes.end());
     cbFlatKey += (unsigned int) srkBytes.size();
+    */
 
     it = serializedKey.begin();
     serializedKey.insert(
@@ -334,12 +390,13 @@ bool CAttestationLib::LoadSealedUserKey(ByteVec &serializedKey)
     cbUsed += sizeof(ATTESTED_TPM_KEY);
 
     if (    serializedKey.size() != 
-            sizeof(ATTESTED_TPM_KEY) + pFlatKey->cbEndorsementKey + 
-                pFlatKey->cbStorageRootKey + 
+            sizeof(ATTESTED_TPM_KEY) + /*pFlatKey->cbEndorsementKey + 
+                pFlatKey->cbStorageRootKey +*/ 
                 pFlatKey->cbAttestationIdentityKey + 
                 pFlatKey->cbAttestedUserKey)
         return false;
 
+    /*
     //
     // Deserialize the EK
     //
@@ -357,6 +414,19 @@ bool CAttestationLib::LoadSealedUserKey(ByteVec &serializedKey)
     bv.assign(it + cbUsed, it + cbUsed + pFlatKey->cbStorageRootKey);
     m_srkCreate.FromBuf(bv);
     cbUsed += pFlatKey->cbStorageRootKey;
+    */
+
+    //
+    // Reload the EK
+    //
+
+    MakeEndorsementKey();
+
+    //
+    // Reload the SRK
+    //
+
+    MakeStoragePrimary();
 
     //
     // Deserialize the AIK
@@ -376,6 +446,14 @@ bool CAttestationLib::LoadSealedUserKey(ByteVec &serializedKey)
     m_userCreate.FromBuf(bv);
     cbUsed += pFlatKey->cbAttestedUserKey;
 
+    //
+    // Reload the user key
+    //
+
+    m_hUser = m_tpm.Load(
+        m_hSrk,
+        m_userCreate.outPrivate,
+        m_userCreate.outPublic);
     return true;
 }
 
@@ -390,11 +468,23 @@ bool CAttestationLib::SignHash(const ByteVec &hashBytes, ByteVec &signatureBytes
     // Sign a message with the user key
     //
 
-    auto signature = m_tpm.Sign(
+    TpmCpp::SignResponse signature = m_tpm.Sign(
         m_hUser,
         hashBytes,
         TPMS_NULL_SIG_SCHEME(),
         TPMT_TK_HASHCHECK::NullTicket());
+    if (false == m_tpm._LastOperationSucceeded())
+    {
+        //
+        // Handle renewal of the key
+        //
+
+        // TODO
+
+        signature.signature = 0;
+        cerr << "m_tpm.Sign failed: " << (UINT32) m_tpm._GetLastError() << endl;
+        return false;
+    }
 
     //
     // Return the signature bytes
@@ -569,6 +659,8 @@ bool CAttestationLib::RestRegisterKey(
         utility::conversions::to_base64(clientKeyCreation.ToBuf()));
     reg_req_node[U("KeyQuote")] = web::json::value::string(
         utility::conversions::to_base64(clientKeyQuote.ToBuf()));
+    reg_req_node[U("ClientDeviceName")] = web::json::value::string(_getDeviceName());
+    reg_req_node[U("SystemVersion")] = web::json::value::string(_getSystemVersion());
     request.set_body(reg_req_node);
 
     //
@@ -652,7 +744,10 @@ TPM_HANDLE CAttestationLib::MakeEndorsementKey()
         NullVec,
         vector<TPMS_PCR_SELECTION>());
 
-    return m_ekCreate.objectHandle;
+    m_hEk = m_ekCreate.objectHandle;
+    auto ekPubX = m_tpm.ReadPublic(m_hEk);
+    m_ekPub = ekPubX.outPublic;
+    return m_hEk;
 }
 
 //
@@ -660,6 +755,7 @@ TPM_HANDLE CAttestationLib::MakeEndorsementKey()
 //
 TPM_HANDLE CAttestationLib::MakeStoragePrimary()
 {
+    /*
     vector<BYTE> NullVec;
     TPMT_PUBLIC storagePrimaryTemplate(
         TPM_FOR_IOT_HASH_ALG,
@@ -679,8 +775,12 @@ TPM_HANDLE CAttestationLib::MakeStoragePrimary()
         storagePrimaryTemplate,
         NullVec,
         vector<TPMS_PCR_SELECTION>());
+        */
 
-    return m_srkCreate.objectHandle;
+    m_hSrk.handle = 0x81000001;
+    auto srkPubX = m_tpm.ReadPublic(m_hSrk);
+    m_srkPub = srkPubX.outPublic;
+    return m_hSrk /*m_srkCreate.objectHandle*/;
 }
 
 //
