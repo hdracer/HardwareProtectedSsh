@@ -11,7 +11,7 @@ class ATTESTATIONLIB_API CAttestationLib {
 public:
 	CAttestationLib(void);
     ~CAttestationLib(void);
-    void Initialize(std::string attestationServerUrl);
+    void Initialize(std::wstring attestationServerHost, std::wstring attestationServerScheme);
     bool CreateAttestationIdentityKey();
     bool CreateSealedUserKey();
     bool SaveSealedUserKey(ByteVec &serializedKey);
@@ -41,14 +41,13 @@ private:
         ActivationData &activationData);
 
 private:
-    std::string m_attestationServerUrl;
+    std::wstring m_attestationServerHost;
+    std::wstring m_attestationServerScheme;
     TpmDevice *m_pDevice;
     Tpm2 m_tpm;
     CreatePrimaryResponse m_ekCreate;
     TPM_HANDLE m_hEk;
     TPMT_PUBLIC m_ekPub;
-    //ReadPublicResponse m_srkReadPublic;
-    //CreatePrimaryResponse m_srkCreate;
     TPM_HANDLE m_hSrk;
     TPMT_PUBLIC m_srkPub;
     CreateResponse m_aikCreate;
