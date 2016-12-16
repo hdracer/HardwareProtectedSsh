@@ -27,12 +27,12 @@ Makefile.dep: $(SRCS)
 -include Makefile.dep
 
 TpmCpp: deps $(OBJS)
-	rm -rf TpmCpp.a
-	ar -cq TpmCpp.a $(OBJS)
-	rm -rf TpmCpp.so
+	rm -rf $(DEST_DIR)/TpmCppLib.a
+	ar -cq $(DEST_DIR)/TpmCppLib.a $(OBJS)
+	rm -rf $(LIBPATH)
 	g++ -shared -o $(LIBPATH) $(OBJS)
 install:
-	cp $(LIBNAME) /usr/local/lib
+	cp $(LIBPATH) /usr/local/lib
 	chmod 0755 /usr/local/lib/$(LIBNAME)
 
 clean:
