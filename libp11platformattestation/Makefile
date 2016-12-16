@@ -6,7 +6,8 @@ DEST_DIR=../linux
 CC= gcc
 ARCH_FLAGS= -m64
 CFLAGS= $(ARCH_FLAGS) -Wall -Wno-extra -Werror -Wno-unused-parameter -g -std=c++11 -I$(SRC_DIR) -I$(TPM_DIR) -I$(ATTESTATION_DIR)
-LIBNAME=$(DEST_DIR)/libp11platformattestation-x64.so
+LIBBASENAME=libp11platformattestation-x64.so
+LIBNAME=$(DEST_DIR)/$(LIBBASENAME)
 
 all: libp11platformattestation.o
 	$(CC) $(ARCH_FLAGS) -shared -o $(LIBNAME) libp11platformattestation.o
@@ -16,7 +17,7 @@ libp11platformattestation.o: $(SRC_DIR)/libp11platformattestation.cpp $(SRC_DIR)
 
 install:
 	cp $(LIBNAME) /usr/local/lib
-	chmod 0755 /usr/local/lib/$(LIBNAME)
+	chmod 0755 /usr/local/lib/$(LIBBASENAME)
 
 clean:
 	-rm -f *.o
