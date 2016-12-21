@@ -100,6 +100,7 @@ void _OutputDbgStr(
 #define P11PA_OBJECT_HANDLE_SECRET_KEY 2
 #define P11PA_OBJECT_HANDLE_PUBLIC_KEY 3
 #define P11PA_OBJECT_HANDLE_PRIVATE_KEY 4
+#define P11PA_OBJECT_HANDLE_CERTIFICATE 5
 
 typedef enum
 {
@@ -139,6 +140,8 @@ typedef struct _P11PA_SESSION
     PP11PA_KEY pCurrentKey;
     CK_ULONG ulState;
     CK_BBOOL fOpened;
+    CK_BBOOL fFindObjectInit;
+    CK_OBJECT_CLASS findObjectClass;
 } P11PA_SESSION, *PP11PA_SESSION;
 
 //
@@ -149,7 +152,6 @@ CK_BBOOL p11pa_initialized = CK_FALSE;
 CK_BBOOL p11pa_session_opened = CK_FALSE;
 CK_ULONG p11pa_session_state = CKS_RO_PUBLIC_SESSION;
 P11PA_OPERATION p11pa_active_operation = P11PA_OPERATION_NONE;
-CK_OBJECT_HANDLE p11pa_find_result = CKR_OBJECT_HANDLE_INVALID;
 
 CK_FUNCTION_LIST g_p11pa_functions;
 P11PA_SESSION g_rgSessions[1];
@@ -161,6 +163,39 @@ PP11PA_SESSION _SessionPointerFromHandle(CK_SESSION_HANDLE hSession)
     if (SESSION_DEFAULT_HANDLE_VALUE == hSession)
         return g_rgSessions;
     return 0;
+}
+
+CK_RV _InitializeKey(PP11PA_KEY *ppKey)
+{
+    CK_RV result = 0;
+
+    //
+    // Create the key structure
+    //
+
+    CHECK_ALLOC(*ppKey = (PP11PA_KEY)malloc(sizeof(P11PA_KEY)));
+    CHECK_ALLOC((*ppKey)->pAttestationLib = new CAttestationLib());
+
+    //
+    // Initialize
+    //
+
+    (*ppKey)->pAttestationLib->Initialize(
+        std::wstring(L"strongnetsvc.jwsecure.com"),
+        std::wstring(L"https"));
+
+out:
+    return result;
+}
+
+void _FreeKey(PP11PA_KEY pKey)
+{
+    if (0 != pKey)
+    {
+        if (0 != pKey->pAttestationLib)
+            free(pKey->pAttestationLib);
+        free(pKey);
+    }
 }
 
 //
@@ -206,10 +241,10 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetInfo)(CK_INFO_PTR pInfo)
 
     pInfo->cryptokiVersion.major = 0x02;
     pInfo->cryptokiVersion.minor = 0x14;
-    memset(pInfo->manufacturerID, ' ', sizeof(pInfo->manufacturerID));
+    memset(pInfo->manufacturerID, 0, sizeof(pInfo->manufacturerID));
     memcpy(pInfo->manufacturerID, P11PA_INFO_MANUFACTURER_ID, strlen(P11PA_INFO_MANUFACTURER_ID));
     pInfo->flags = 0;
-    memset(pInfo->libraryDescription, ' ', sizeof(pInfo->libraryDescription));
+    memset(pInfo->libraryDescription, 0, sizeof(pInfo->libraryDescription));
     memcpy(pInfo->libraryDescription, P11PA_INFO_LIBRARY_DESCRIPTION, strlen(P11PA_INFO_LIBRARY_DESCRIPTION));
     pInfo->libraryVersion.major = 0x01;
     pInfo->libraryVersion.minor = 0x00;
@@ -383,7 +418,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetTokenInfo)(CK_SLOT_ID slotID, CK_TOKEN_INFO_PTR p
     memcpy(pInfo->model, P11PA_TOKEN_INFO_MODEL, strlen(P11PA_TOKEN_INFO_MODEL));
     memset(pInfo->serialNumber, ' ', sizeof(pInfo->serialNumber));
     memcpy(pInfo->serialNumber, P11PA_TOKEN_INFO_SERIAL_NUMBER, strlen(P11PA_TOKEN_INFO_SERIAL_NUMBER));
-    pInfo->flags = CKF_RNG | CKF_LOGIN_REQUIRED | CKF_USER_PIN_INITIALIZED | CKF_TOKEN_INITIALIZED;
+    pInfo->flags = /*CKF_RNG | CKF_LOGIN_REQUIRED | CKF_USER_PIN_INITIALIZED |*/ CKF_TOKEN_INITIALIZED;
     pInfo->ulMaxSessionCount = sizeof(g_rgSessions) / sizeof(g_rgSessions[0]);
     pInfo->ulSessionCount = (CK_TRUE == p11pa_session_opened) ? 1 : 0;
     pInfo->ulMaxRwSessionCount = sizeof(g_rgSessions) / sizeof(g_rgSessions[0]);
@@ -656,8 +691,7 @@ out:
 CK_DEFINE_FUNCTION(CK_RV, C_CloseSession)(CK_SESSION_HANDLE hSession)
 {
     CK_RV result = CKR_OK;
-    PP11PA_SESSION pSession = _SessionPointerFromHandle(
-        hSession);
+    PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
 
     //
     // Check parameters
@@ -961,69 +995,109 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetObjectSize)(CK_SESSION_HANDLE hSession, CK_OBJECT
 }
 
 
-CK_DEFINE_FUNCTION(CK_RV, C_GetAttributeValue)(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hObject, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
+CK_DEFINE_FUNCTION(CK_RV, C_GetAttributeValue)(
+    CK_SESSION_HANDLE hSession, 
+    CK_OBJECT_HANDLE hObject, 
+    CK_ATTRIBUTE_PTR pTemplate, 
+    CK_ULONG ulCount)
 {
-    CK_ULONG i = 0;
+    CK_RV result = CKR_OK;
+    PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
+    CK_ULONG ulAttr = 0;
+    CK_VOID_PTR pvAttr = 0;
+    CK_ULONG cbAttr = 0;
+    std::string attrStr;
+    ByteVec attrBytes;
+
+    //
+    // Check parameters
+    //
 
     if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
+    {
+        CHECK_CKR(CKR_CRYPTOKI_NOT_INITIALIZED);
+    }
 
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
+    if (0 == pSession || CK_FALSE == pSession->fOpened)
+    {
+        CHECK_CKR(CKR_SESSION_HANDLE_INVALID);
+    }
 
-    if ((P11PA_OBJECT_HANDLE_DATA != hObject) &&
-        (P11PA_OBJECT_HANDLE_SECRET_KEY != hObject) &&
-        (P11PA_OBJECT_HANDLE_PUBLIC_KEY != hObject) &&
-        (P11PA_OBJECT_HANDLE_PRIVATE_KEY != hObject))
-        return CKR_OBJECT_HANDLE_INVALID;
+    if (PUBLICKEY_DEFAULT_HANDLE_VALUE != hObject &&
+        PRIVATEKEY_DEFAULT_HANDLE_VALUE != hObject)
+    {
+        CHECK_CKR(CKR_OBJECT_HANDLE_INVALID);
+    }
 
     if (NULL == pTemplate)
-        return CKR_ARGUMENTS_BAD;
+    {
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
+    }
 
     if (0 >= ulCount)
-        return CKR_ARGUMENTS_BAD;
-
-    for (i = 0; i < ulCount; i++)
     {
-        if (CKA_LABEL == pTemplate[i].type)
-        {
-            if (NULL != pTemplate[i].pValue)
-            {
-                if (pTemplate[i].ulValueLen < strlen(P11PA_OBJECT_CKA_LABEL))
-                    return CKR_BUFFER_TOO_SMALL;
-                else
-                    memcpy(pTemplate[i].pValue, P11PA_OBJECT_CKA_LABEL, strlen(P11PA_OBJECT_CKA_LABEL));
-            }
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
+    }
 
-            pTemplate[i].ulValueLen = (CK_ULONG) strlen(P11PA_OBJECT_CKA_LABEL);
-        }
-        else if (CKA_VALUE == pTemplate[i].type)
+    //
+    // Enumerate the requested attributes
+    //
+
+    for (CK_ULONG iAttrib = 0; iAttrib < ulCount; iAttrib++)
+    {
+        switch (pTemplate[iAttrib].type)
         {
-            if (P11PA_OBJECT_HANDLE_PRIVATE_KEY == hObject)
+        case CKA_LABEL:
+        case CKA_ID:
+            //
+            // Get the TPM key name
+            //
+
+            attrStr = 
+                pSession->pCurrentKey->pAttestationLib->GetUserPubHashHex();
+            pvAttr = (CK_VOID_PTR) attrStr.data();
+            cbAttr = (CK_ULONG) attrStr.size();
+            break;
+
+        case CKA_MODULUS:
+            attrBytes = 
+                pSession->pCurrentKey->pAttestationLib->GetUserPubModulus();
+            pvAttr = attrBytes.data();
+            cbAttr = (CK_ULONG) attrBytes.size();
+            break;
+
+        case CKA_PUBLIC_EXPONENT:
+            ulAttr = 0x10001;
+            pvAttr = &ulAttr;
+            cbAttr = sizeof(ulAttr);
+            break;
+
+        default:
+            CHECK_CKR(CKR_ATTRIBUTE_TYPE_INVALID);
+        }
+
+        //
+        // Copy out the data and size
+        //
+
+        if (NULL != pTemplate[iAttrib].pValue)
+        {
+            if (pTemplate[iAttrib].ulValueLen < cbAttr)
             {
-                pTemplate[i].ulValueLen = (CK_ULONG)-1;
+                CHECK_CKR(CKR_BUFFER_TOO_SMALL);
             }
             else
             {
-                if (NULL != pTemplate[i].pValue)
-                {
-                    if (pTemplate[i].ulValueLen < strlen(P11PA_OBJECT_CKA_VALUE))
-                        return CKR_BUFFER_TOO_SMALL;
-                    else
-                        memcpy(pTemplate[i].pValue, P11PA_OBJECT_CKA_VALUE, strlen(P11PA_OBJECT_CKA_VALUE));
-                }
-
-                pTemplate[i].ulValueLen = (CK_ULONG) strlen(P11PA_OBJECT_CKA_VALUE);
+                memcpy(pTemplate[iAttrib].pValue, pvAttr, cbAttr);
             }
         }
-        else
-        {
-            return CKR_ATTRIBUTE_TYPE_INVALID;
-        }
+
+        pTemplate[iAttrib].ulValueLen = cbAttr;
     }
 
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+out:
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
@@ -1070,10 +1144,17 @@ CK_DEFINE_FUNCTION(CK_RV, C_SetAttributeValue)(CK_SESSION_HANDLE hSession, CK_OB
 }
 
 
-CK_DEFINE_FUNCTION(CK_RV, C_FindObjectsInit)(CK_SESSION_HANDLE hSession, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount)
+CK_DEFINE_FUNCTION(CK_RV, C_FindObjectsInit)(
+    CK_SESSION_HANDLE hSession, 
+    CK_ATTRIBUTE_PTR pTemplate, 
+    CK_ULONG ulCount)
 {
     CK_ULONG i = 0;
-    CK_ULONG_PTR cka_class_value = NULL;
+    PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
+
+    //
+    // Check parameters
+    //
 
     if (CK_FALSE == p11pa_initialized)
         return CKR_CRYPTOKI_NOT_INITIALIZED;
@@ -1081,72 +1162,67 @@ CK_DEFINE_FUNCTION(CK_RV, C_FindObjectsInit)(CK_SESSION_HANDLE hSession, CK_ATTR
     if (P11PA_OPERATION_NONE != p11pa_active_operation)
         return CKR_OPERATION_ACTIVE;
 
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
+    if (0 == pSession || CK_FALSE == pSession->fOpened)
         return CKR_SESSION_HANDLE_INVALID;
 
     if (NULL == pTemplate)
         return CKR_ARGUMENTS_BAD;
 
-    UNREFERENCED_PARAMETER(ulCount);
-
-    p11pa_find_result = CK_INVALID_HANDLE;
-
-    for (i = 0; i < ulCount; i++)
+    if (0 == ulCount ||
+        0 == pTemplate[0].pValue ||
+        CKA_CLASS != pTemplate[0].type ||
+        sizeof(CK_OBJECT_CLASS) != pTemplate[0].ulValueLen)
     {
-        if (NULL == pTemplate[i].pValue)
-            return CKR_ATTRIBUTE_VALUE_INVALID;
-
-        if (0 >= pTemplate[i].ulValueLen)
-            return CKR_ATTRIBUTE_VALUE_INVALID;
-
-        if (CKA_CLASS == pTemplate[i].type)
-        {
-            if (sizeof(CK_ULONG) != pTemplate[i].ulValueLen)
-                return CKR_ATTRIBUTE_VALUE_INVALID;
-
-            cka_class_value = (CK_ULONG_PTR)pTemplate[i].pValue;
-
-            switch (*cka_class_value)
-            {
-            case CKO_DATA:
-                p11pa_find_result = P11PA_OBJECT_HANDLE_DATA;
-                break;
-            case CKO_SECRET_KEY:
-                p11pa_find_result = P11PA_OBJECT_HANDLE_SECRET_KEY;
-                break;
-            case CKO_PUBLIC_KEY:
-                p11pa_find_result = P11PA_OBJECT_HANDLE_PUBLIC_KEY;
-                break;
-            case CKO_PRIVATE_KEY:
-                p11pa_find_result = P11PA_OBJECT_HANDLE_PRIVATE_KEY;
-                break;
-            }
-        }
+        return CKR_ATTRIBUTE_VALUE_INVALID;
     }
 
-    p11pa_active_operation = P11PA_OPERATION_FIND;
+    //
+    // Allow filtering on a single object class attribute
+    //
 
+    pSession->fFindObjectInit = CK_TRUE;
+    memcpy(
+        &pSession->findObjectClass, 
+        pTemplate[0].pValue, 
+        sizeof(CK_OBJECT_CLASS));
+
+    //
+    // Done
+    //
+
+    p11pa_active_operation = P11PA_OPERATION_FIND;
     LOG_CALL(__FUNCTION__, 0);
     return CKR_OK;
 }
 
-
-CK_DEFINE_FUNCTION(CK_RV, C_FindObjects)(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE_PTR phObject, CK_ULONG ulMaxObjectCount, CK_ULONG_PTR pulObjectCount)
+CK_DEFINE_FUNCTION(CK_RV, C_FindObjects)(
+    CK_SESSION_HANDLE hSession, 
+    CK_OBJECT_HANDLE_PTR phObject, 
+    CK_ULONG ulMaxObjectCount, 
+    CK_ULONG_PTR pulObjectCount)
 {
+    CK_RV result = 0;
+    PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
+    PP11PA_KEY pKey = 0;
+    ByteVec serializedKey;
+    std::vector<string> userKeyFiles;
+
+    //
+    // Check parameters
+    //
+
     if (CK_FALSE == p11pa_initialized)
         return CKR_CRYPTOKI_NOT_INITIALIZED;
 
-    if (    P11PA_OPERATION_FIND != p11pa_active_operation &&
-            P11PA_OPERATION_FIND_COMPLETE != p11pa_active_operation)
+    if (    (P11PA_OPERATION_FIND != p11pa_active_operation &&
+            P11PA_OPERATION_FIND_COMPLETE != p11pa_active_operation) ||
+            CK_FALSE == pSession->fFindObjectInit)
         return CKR_OPERATION_NOT_INITIALIZED;
 
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
+    if (0 == pSession || CK_FALSE == pSession->fOpened)
         return CKR_SESSION_HANDLE_INVALID;
 
-    if ((NULL == phObject) && (0 < ulMaxObjectCount))
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulObjectCount)
+    if (0 == phObject || 0 == ulMaxObjectCount || 0 == pulObjectCount)
         return CKR_ARGUMENTS_BAD;
 
     if (P11PA_OPERATION_FIND_COMPLETE == p11pa_active_operation) 
@@ -1155,52 +1231,97 @@ CK_DEFINE_FUNCTION(CK_RV, C_FindObjects)(CK_SESSION_HANDLE hSession, CK_OBJECT_H
         return CKR_OK;
     }
 
-    switch (p11pa_find_result)
+    //
+    // Return object handles based on find type
+    //
+
+    switch (pSession->findObjectClass)
     {
-    case P11PA_OBJECT_HANDLE_DATA:
-        if (ulMaxObjectCount >= 2)
+    case CKO_PRIVATE_KEY:
+    case CKO_PUBLIC_KEY:
+        //
+        // Check for an existing key
+        //
+
+        CHECK_CKR(_InitializeKey(&pKey));
+
+        if (true == PhlpEnumerateUserKeyFiles(userKeyFiles) &&
+            0 < userKeyFiles.size())
         {
-            phObject[0] = p11pa_find_result;
-            phObject[1] = p11pa_find_result;
+            //
+            // Try working with the first key
+            //
+
+            if (false == PhlpReadFile(userKeyFiles[0], serializedKey))
+            {
+                CHECK_CKR(CKR_FUNCTION_FAILED);
+            }
+
+            if (false == pKey->pAttestationLib->LoadSealedUserKey(serializedKey))
+            {
+                CHECK_CKR(CKR_FUNCTION_FAILED);
+            }
+
+            //
+            // Return the key handle
+            //
+
+            *phObject = 
+                CKO_PUBLIC_KEY == pSession->findObjectClass ? 
+                PUBLICKEY_DEFAULT_HANDLE_VALUE : 
+                PRIVATEKEY_DEFAULT_HANDLE_VALUE;
+            *pulObjectCount = 1;
+            pSession->pCurrentKey = pKey;
+            pKey = 0;
+        }
+        else
+        {
+            *pulObjectCount = 0;
         }
 
-        *pulObjectCount = 2;
         p11pa_active_operation = P11PA_OPERATION_FIND_COMPLETE;
         break;
 
-    case CK_INVALID_HANDLE:
-        *pulObjectCount = 0;
-        break;
-
     default:
-        if (ulMaxObjectCount >= 1)
-        {
-            phObject[0] = p11pa_find_result;
-        }
-
-        *pulObjectCount = 1;
+        *pulObjectCount = 0;
         p11pa_active_operation = P11PA_OPERATION_FIND_COMPLETE;
         break;
     }
 
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+out:
+    if (0 != pKey)
+        _FreeKey(pKey);
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_FindObjectsFinal)(CK_SESSION_HANDLE hSession)
 {
+    PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
+
+    //
+    // Check parameters
+    //
+
     if (CK_FALSE == p11pa_initialized)
         return CKR_CRYPTOKI_NOT_INITIALIZED;
 
-    if (    P11PA_OPERATION_FIND != p11pa_active_operation && 
-            P11PA_OPERATION_FIND_COMPLETE != p11pa_active_operation)
+    if (    (P11PA_OPERATION_FIND != p11pa_active_operation && 
+            P11PA_OPERATION_FIND_COMPLETE != p11pa_active_operation) ||
+            CK_FALSE == pSession->fFindObjectInit)
         return CKR_OPERATION_NOT_INITIALIZED;
 
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
+    if (0 == pSession || CK_FALSE == pSession->fOpened)
         return CKR_SESSION_HANDLE_INVALID;
 
+    //
+    // Clean-up find objects state
+    //
+
     p11pa_active_operation = P11PA_OPERATION_NONE;
+    pSession->fFindObjectInit = CK_FALSE;
+    pSession->findObjectClass = 0;
 
     LOG_CALL(__FUNCTION__, 0);
     return CKR_OK;
@@ -1209,598 +1330,105 @@ CK_DEFINE_FUNCTION(CK_RV, C_FindObjectsFinal)(CK_SESSION_HANDLE hSession)
 
 CK_DEFINE_FUNCTION(CK_RV, C_EncryptInit)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((P11PA_OPERATION_NONE != p11pa_active_operation) &&
-        (P11PA_OPERATION_DIGEST != p11pa_active_operation) &&
-        (P11PA_OPERATION_SIGN != p11pa_active_operation))
-        return CKR_OPERATION_ACTIVE;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pMechanism)
-        return CKR_ARGUMENTS_BAD;
-
-    switch (pMechanism->mechanism)
-    {
-    case CKM_RSA_PKCS:
-
-        if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_PUBLIC_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
-
-        break;
-
-    case CKM_RSA_PKCS_OAEP:
-
-        if ((NULL == pMechanism->pParameter) || (sizeof(CK_RSA_PKCS_OAEP_PARAMS) != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_PUBLIC_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
-
-        break;
-
-    case CKM_DES3_CBC:
-
-        if ((NULL == pMechanism->pParameter) || (8 != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_SECRET_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
-
-        break;
-
-    case CKM_AES_CBC:
-
-        if ((NULL == pMechanism->pParameter) || (16 != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_SECRET_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
-
-        break;
-
-    default:
-
-        return CKR_MECHANISM_INVALID;
-    }
-
-    switch (p11pa_active_operation)
-    {
-    case P11PA_OPERATION_NONE:
-        p11pa_active_operation = P11PA_OPERATION_ENCRYPT;
-        break;
-    case P11PA_OPERATION_DIGEST:
-        p11pa_active_operation = P11PA_OPERATION_DIGEST_ENCRYPT;
-        break;
-    case P11PA_OPERATION_SIGN:
-        p11pa_active_operation = P11PA_OPERATION_SIGN_ENCRYPT;
-        break;
-    default:
-        return CKR_FUNCTION_FAILED;
-    }
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_Encrypt)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pEncryptedData, CK_ULONG_PTR pulEncryptedDataLen)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_ENCRYPT != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pData)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulDataLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulEncryptedDataLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pEncryptedData)
-    {
-        if (ulDataLen > *pulEncryptedDataLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            for (i = 0; i < ulDataLen; i++)
-                pEncryptedData[i] = pData[i] ^ 0xAB;
-
-            p11pa_active_operation = P11PA_OPERATION_NONE;
-        }
-    }
-
-    *pulEncryptedDataLen = ulDataLen;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_EncryptUpdate)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen, CK_BYTE_PTR pEncryptedPart, CK_ULONG_PTR pulEncryptedPartLen)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_ENCRYPT != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pPart)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulEncryptedPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pEncryptedPart)
-    {
-        if (ulPartLen > *pulEncryptedPartLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            for (i = 0; i < ulPartLen; i++)
-                pEncryptedPart[i] = pPart[i] ^ 0xAB;
-        }
-    }
-
-    *pulEncryptedPartLen = ulPartLen;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_EncryptFinal)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pLastEncryptedPart, CK_ULONG_PTR pulLastEncryptedPartLen)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((P11PA_OPERATION_ENCRYPT != p11pa_active_operation) &&
-        (P11PA_OPERATION_DIGEST_ENCRYPT != p11pa_active_operation) &&
-        (P11PA_OPERATION_SIGN_ENCRYPT != p11pa_active_operation))
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pulLastEncryptedPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pLastEncryptedPart)
-    {
-        switch (p11pa_active_operation)
-        {
-        case P11PA_OPERATION_ENCRYPT:
-            p11pa_active_operation = P11PA_OPERATION_NONE;
-            break;
-        case P11PA_OPERATION_DIGEST_ENCRYPT:
-            p11pa_active_operation = P11PA_OPERATION_DIGEST;
-            break;
-        case P11PA_OPERATION_SIGN_ENCRYPT:
-            p11pa_active_operation = P11PA_OPERATION_SIGN;
-            break;
-        default:
-            return CKR_FUNCTION_FAILED;
-        }
-    }
-
-    *pulLastEncryptedPartLen = 0;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_DecryptInit)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((P11PA_OPERATION_NONE != p11pa_active_operation) &&
-        (P11PA_OPERATION_DIGEST != p11pa_active_operation) &&
-        (P11PA_OPERATION_VERIFY != p11pa_active_operation))
-        return CKR_OPERATION_ACTIVE;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pMechanism)
-        return CKR_ARGUMENTS_BAD;
-
-    switch (pMechanism->mechanism)
-    {
-    case CKM_RSA_PKCS:
-
-        if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_PRIVATE_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
-
-        break;
-
-    case CKM_RSA_PKCS_OAEP:
-
-        if ((NULL == pMechanism->pParameter) || (sizeof(CK_RSA_PKCS_OAEP_PARAMS) != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_PRIVATE_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
-
-        break;
-
-    case CKM_DES3_CBC:
-
-        if ((NULL == pMechanism->pParameter) || (8 != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_SECRET_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
-
-        break;
-
-    case CKM_AES_CBC:
-
-        if ((NULL == pMechanism->pParameter) || (16 != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_SECRET_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
-
-        break;
-
-    default:
-
-        return CKR_MECHANISM_INVALID;
-    }
-
-    switch (p11pa_active_operation)
-    {
-    case P11PA_OPERATION_NONE:
-        p11pa_active_operation = P11PA_OPERATION_DECRYPT;
-        break;
-    case P11PA_OPERATION_DIGEST:
-        p11pa_active_operation = P11PA_OPERATION_DECRYPT_DIGEST;
-        break;
-    case P11PA_OPERATION_VERIFY:
-        p11pa_active_operation = P11PA_OPERATION_DECRYPT_VERIFY;
-        break;
-    default:
-        return CKR_FUNCTION_FAILED;
-    }
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_Decrypt)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncryptedData, CK_ULONG ulEncryptedDataLen, CK_BYTE_PTR pData, CK_ULONG_PTR pulDataLen)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_DECRYPT != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pEncryptedData)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulEncryptedDataLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulDataLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pData)
-    {
-        if (ulEncryptedDataLen > *pulDataLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            for (i = 0; i < ulEncryptedDataLen; i++)
-                pData[i] = pEncryptedData[i] ^ 0xAB;
-
-            p11pa_active_operation = P11PA_OPERATION_NONE;
-        }
-    }
-
-    *pulDataLen = ulEncryptedDataLen;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_DecryptUpdate)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncryptedPart, CK_ULONG ulEncryptedPartLen, CK_BYTE_PTR pPart, CK_ULONG_PTR pulPartLen)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_DECRYPT != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pEncryptedPart)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulEncryptedPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pPart)
-    {
-        if (ulEncryptedPartLen > *pulPartLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            for (i = 0; i < ulEncryptedPartLen; i++)
-                pPart[i] = pEncryptedPart[i] ^ 0xAB;
-        }
-    }
-
-    *pulPartLen = ulEncryptedPartLen;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_DecryptFinal)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pLastPart, CK_ULONG_PTR pulLastPartLen)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((P11PA_OPERATION_DECRYPT != p11pa_active_operation) &&
-        (P11PA_OPERATION_DECRYPT_DIGEST != p11pa_active_operation) &&
-        (P11PA_OPERATION_DECRYPT_VERIFY != p11pa_active_operation))
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pulLastPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pLastPart)
-    {
-        switch (p11pa_active_operation)
-        {
-        case P11PA_OPERATION_DECRYPT:
-            p11pa_active_operation = P11PA_OPERATION_NONE;
-            break;
-        case P11PA_OPERATION_DECRYPT_DIGEST:
-            p11pa_active_operation = P11PA_OPERATION_DIGEST;
-            break;
-        case P11PA_OPERATION_DECRYPT_VERIFY:
-            p11pa_active_operation = P11PA_OPERATION_VERIFY;
-            break;
-        default:
-            return CKR_FUNCTION_FAILED;
-        }
-    }
-
-    *pulLastPartLen = 0;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_DigestInit)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((P11PA_OPERATION_NONE != p11pa_active_operation) &&
-        (P11PA_OPERATION_ENCRYPT != p11pa_active_operation) &&
-        (P11PA_OPERATION_DECRYPT != p11pa_active_operation))
-        return CKR_OPERATION_ACTIVE;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pMechanism)
-        return CKR_ARGUMENTS_BAD;
-
-    if (CKM_SHA_1 != pMechanism->mechanism)
-        return CKR_MECHANISM_INVALID;
-
-    if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
-        return CKR_MECHANISM_PARAM_INVALID;
-
-    switch (p11pa_active_operation)
-    {
-    case P11PA_OPERATION_NONE:
-        p11pa_active_operation = P11PA_OPERATION_DIGEST;
-        break;
-    case P11PA_OPERATION_ENCRYPT:
-        p11pa_active_operation = P11PA_OPERATION_DIGEST_ENCRYPT;
-        break;
-    case P11PA_OPERATION_DECRYPT:
-        p11pa_active_operation = P11PA_OPERATION_DECRYPT_DIGEST;
-        break;
-    default:
-        return CKR_FUNCTION_FAILED;
-    }
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_Digest)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pDigest, CK_ULONG_PTR pulDigestLen)
 {
-    CK_BYTE hash[20] = { 0x7B, 0x50, 0x2C, 0x3A, 0x1F, 0x48, 0xC8, 0x60, 0x9A, 0xE2, 0x12, 0xCD, 0xFB, 0x63, 0x9D, 0xEE, 0x39, 0x67, 0x3F, 0x5E };
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_DIGEST != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pData)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulDataLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulDigestLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pDigest)
-    {
-        if (sizeof(hash) > *pulDigestLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            memcpy(pDigest, hash, sizeof(hash));
-            p11pa_active_operation = P11PA_OPERATION_NONE;
-        }
-    }
-
-    *pulDigestLen = sizeof(hash);
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_DigestUpdate)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_DIGEST != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pPart)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_DigestKey)(CK_SESSION_HANDLE hSession, CK_OBJECT_HANDLE hKey)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_DIGEST != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (P11PA_OBJECT_HANDLE_SECRET_KEY != hKey)
-        return CKR_OBJECT_HANDLE_INVALID;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_DigestFinal)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pDigest, CK_ULONG_PTR pulDigestLen)
 {
-    CK_BYTE hash[20] = { 0x7B, 0x50, 0x2C, 0x3A, 0x1F, 0x48, 0xC8, 0x60, 0x9A, 0xE2, 0x12, 0xCD, 0xFB, 0x63, 0x9D, 0xEE, 0x39, 0x67, 0x3F, 0x5E };
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((P11PA_OPERATION_DIGEST != p11pa_active_operation) &&
-        (P11PA_OPERATION_DIGEST_ENCRYPT != p11pa_active_operation) &&
-        (P11PA_OPERATION_DECRYPT_DIGEST != p11pa_active_operation))
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pulDigestLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pDigest)
-    {
-        if (sizeof(hash) > *pulDigestLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            memcpy(pDigest, hash, sizeof(hash));
-
-            switch (p11pa_active_operation)
-            {
-            case P11PA_OPERATION_DIGEST:
-                p11pa_active_operation = P11PA_OPERATION_NONE;
-                break;
-            case P11PA_OPERATION_DIGEST_ENCRYPT:
-                p11pa_active_operation = P11PA_OPERATION_ENCRYPT;
-                break;
-            case P11PA_OPERATION_DECRYPT_DIGEST:
-                p11pa_active_operation = P11PA_OPERATION_DECRYPT;
-                break;
-            default:
-                return CKR_FUNCTION_FAILED;
-            }
-        }
-    }
-
-    *pulDigestLen = sizeof(hash);
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
@@ -1997,79 +1625,17 @@ CK_DEFINE_FUNCTION(CK_RV, C_SignFinal)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR p
 
 CK_DEFINE_FUNCTION(CK_RV, C_SignRecoverInit)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_NONE != p11pa_active_operation)
-        return CKR_OPERATION_ACTIVE;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pMechanism)
-        return CKR_ARGUMENTS_BAD;
-
-    if (CKM_RSA_PKCS == pMechanism->mechanism)
-    {
-        if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_PRIVATE_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
-    }
-    else
-    {
-        return CKR_MECHANISM_INVALID;
-    }
-
-    p11pa_active_operation = P11PA_OPERATION_SIGN_RECOVER;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_SignRecover)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_SIGN_RECOVER != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pData)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulDataLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulSignatureLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pSignature)
-    {
-        if (ulDataLen > *pulSignatureLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            for (i = 0; i < ulDataLen; i++)
-                pSignature[i] = pData[i] ^ 0xAB;
-
-            p11pa_active_operation = P11PA_OPERATION_NONE;
-        }
-    }
-
-    *pulSignatureLen = ulDataLen;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
@@ -2209,291 +1775,57 @@ CK_DEFINE_FUNCTION(CK_RV, C_VerifyFinal)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR
 
 CK_DEFINE_FUNCTION(CK_RV, C_VerifyRecoverInit)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_NONE != p11pa_active_operation)
-        return CKR_OPERATION_ACTIVE;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pMechanism)
-        return CKR_ARGUMENTS_BAD;
-
-    if (CKM_RSA_PKCS == pMechanism->mechanism)
-    {
-        if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_PUBLIC_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
-    }
-    else
-    {
-        return CKR_MECHANISM_INVALID;
-    }
-
-    p11pa_active_operation = P11PA_OPERATION_VERIFY_RECOVER;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_VerifyRecover)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG ulSignatureLen, CK_BYTE_PTR pData, CK_ULONG_PTR pulDataLen)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_VERIFY_RECOVER != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pSignature)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulSignatureLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulDataLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pData)
-    {
-        if (ulSignatureLen > *pulDataLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            for (i = 0; i < ulSignatureLen; i++)
-                pData[i] = pSignature[i] ^ 0xAB;
-
-            p11pa_active_operation = P11PA_OPERATION_NONE;
-        }
-    }
-
-    *pulDataLen = ulSignatureLen;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_DigestEncryptUpdate)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen, CK_BYTE_PTR pEncryptedPart, CK_ULONG_PTR pulEncryptedPartLen)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_DIGEST_ENCRYPT != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pPart)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulEncryptedPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pEncryptedPart)
-    {
-        if (ulPartLen > *pulEncryptedPartLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            for (i = 0; i < ulPartLen; i++)
-                pEncryptedPart[i] = pPart[i] ^ 0xAB;
-        }
-    }
-
-    *pulEncryptedPartLen = ulPartLen;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_DecryptDigestUpdate)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncryptedPart, CK_ULONG ulEncryptedPartLen, CK_BYTE_PTR pPart, CK_ULONG_PTR pulPartLen)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_DECRYPT_DIGEST != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pEncryptedPart)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulEncryptedPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pPart)
-    {
-        if (ulEncryptedPartLen > *pulPartLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            for (i = 0; i < ulEncryptedPartLen; i++)
-                pPart[i] = pEncryptedPart[i] ^ 0xAB;
-        }
-    }
-
-    *pulPartLen = ulEncryptedPartLen;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_SignEncryptUpdate)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen, CK_BYTE_PTR pEncryptedPart, CK_ULONG_PTR pulEncryptedPartLen)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_SIGN_ENCRYPT != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pPart)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulEncryptedPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pEncryptedPart)
-    {
-        if (ulPartLen > *pulEncryptedPartLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            for (i = 0; i < ulPartLen; i++)
-                pEncryptedPart[i] = pPart[i] ^ 0xAB;
-        }
-    }
-
-    *pulEncryptedPartLen = ulPartLen;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_DecryptVerifyUpdate)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pEncryptedPart, CK_ULONG ulEncryptedPartLen, CK_BYTE_PTR pPart, CK_ULONG_PTR pulPartLen)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_DECRYPT_VERIFY != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pEncryptedPart)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulEncryptedPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == pulPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pPart)
-    {
-        if (ulEncryptedPartLen > *pulPartLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            for (i = 0; i < ulEncryptedPartLen; i++)
-                pPart[i] = pEncryptedPart[i] ^ 0xAB;
-        }
-    }
-
-    *pulPartLen = ulEncryptedPartLen;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_GenerateKey)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_ATTRIBUTE_PTR pTemplate, CK_ULONG ulCount, CK_OBJECT_HANDLE_PTR phKey)
 {
-    CK_ULONG i = 0;
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pMechanism)
-        return CKR_ARGUMENTS_BAD;
-
-    if (CKM_DES3_KEY_GEN != pMechanism->mechanism)
-        return CKR_MECHANISM_INVALID;
-
-    if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
-        return CKR_MECHANISM_PARAM_INVALID;
-
-    if (NULL == pTemplate)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulCount)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL == phKey)
-        return CKR_ARGUMENTS_BAD;
-
-    for (i = 0; i < ulCount; i++)
-    {
-        if (NULL == pTemplate[i].pValue)
-            return CKR_ATTRIBUTE_VALUE_INVALID;
-
-        if (0 >= pTemplate[i].ulValueLen)
-            return CKR_ATTRIBUTE_VALUE_INVALID;
-    }
-
-    *phKey = P11PA_OBJECT_HANDLE_SECRET_KEY;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
@@ -2557,85 +1889,48 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(
     // Create the key structure
     //
 
-    CHECK_ALLOC(pKey = (PP11PA_KEY)malloc(sizeof(P11PA_KEY)));
-    CHECK_ALLOC(pKey->pAttestationLib = new CAttestationLib());
+    CHECK_ALLOC(_InitializeKey(&pKey));
 
     //
-    // Initialize
+    // Attest
     //
 
-    pKey->pAttestationLib->Initialize(
-        std::wstring(L"strongnetsvc.jwsecure.com"),
-        std::wstring(L"https"));
-
-    //
-    // Check for an existing key
-    //
-    // TODO - this is a temporary optimization. This check technically 
-    // belongs in the GetObject path. The spec is such that GenKeyPair should 
-    // always create a new set. 
-    //
-
-    if (true == PhlpEnumerateUserKeyFiles(userKeyFiles) &&
-        0 < userKeyFiles.size())
+    if (false == pKey->pAttestationLib->CreateAttestationIdentityKey())
     {
-        //
-        // Try working with the first key
-        //
-
-        if (false == PhlpReadFile(userKeyFiles[0], serializedKey))
-        {
-            CHECK_CKR(CKR_FUNCTION_FAILED);
-        }
-
-        if (false == pKey->pAttestationLib->LoadSealedUserKey(serializedKey))
-        {
-            CHECK_CKR(CKR_FUNCTION_FAILED);
-        }
+        CHECK_CKR(CKR_FUNCTION_FAILED);
     }
-    else
+
+    //
+    // Create the key
+    //
+
+    if (false == pKey->pAttestationLib->CreateSealedUserKey())
     {
-        //
-        // Attest
-        //
+        CHECK_CKR(CKR_FUNCTION_FAILED);
+    }
 
-        if (false == pKey->pAttestationLib->CreateAttestationIdentityKey())
-        {
-            CHECK_CKR(CKR_FUNCTION_FAILED);
-        }
+    // 
+    // Serialize the key
+    //
 
-        //
-        // Create the key
-        //
+    if (false == pKey->pAttestationLib->SaveSealedUserKey(serializedKey))
+    {
+        CHECK_CKR(CKR_FUNCTION_FAILED);
+    }
 
-        if (false == pKey->pAttestationLib->CreateSealedUserKey())
-        {
-            CHECK_CKR(CKR_FUNCTION_FAILED);
-        }
+    //
+    // Save the key
+    //
 
-        // 
-        // Serialize the key
-        //
+    pubKeyHash = pKey->pAttestationLib->GetUserPubHashHex();
+    if (false == PhlpGetUserKeyPath(pubKeyHash, userKeyPath))
+    {
+        CHECK_CKR(CKR_FUNCTION_FAILED);
+    }
 
-        if (false == pKey->pAttestationLib->SaveSealedUserKey(serializedKey))
-        {
-            CHECK_CKR(CKR_FUNCTION_FAILED);
-        }
-
-        //
-        // Save the key
-        //
-
-        pubKeyHash = pKey->pAttestationLib->GetUserPubHashHex();
-        if (false == PhlpGetUserKeyPath(pubKeyHash, userKeyPath))
-        {
-            CHECK_CKR(CKR_FUNCTION_FAILED);
-        }
-
-        if (false == PhlpWriteFile(userKeyPath, serializedKey))
-        {
-            CHECK_CKR(CKR_FUNCTION_FAILED);
-        }
+    if (false == PhlpWriteFile(userKeyPath, serializedKey))
+    {
+        CHECK_CKR(CKR_FUNCTION_FAILED);
     }
 
     //
@@ -2650,9 +1945,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(
 out:
     if (0 != pKey)
     {
-        if (0 != pKey->pAttestationLib)
-            delete pKey->pAttestationLib;
-        free(pKey);
+        _FreeKey(pKey);
     }
 
     LOG_CALL(__FUNCTION__, result);
