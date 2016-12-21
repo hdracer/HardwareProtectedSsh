@@ -6,7 +6,7 @@
 
 #include "stdafx.h"
 #include "libp11platformattestation.h"
-#include "attestationlib.h"
+#include "AttestationLib.h"
 #include "p11helpers.h"
 
 //
@@ -1149,7 +1149,6 @@ CK_DEFINE_FUNCTION(CK_RV, C_FindObjectsInit)(
     CK_ATTRIBUTE_PTR pTemplate, 
     CK_ULONG ulCount)
 {
-    CK_ULONG i = 0;
     PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
 
     //
