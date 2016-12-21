@@ -30,6 +30,7 @@ public:
     bool SignHash(const ByteVec &hashBytes, ByteVec &signatureBytes);
     ByteVec GetEkPubHashBytes();
     std::string GetUserPubHashHex();
+    ByteVec GetUserPubModulus();
 
 private:
     void SetPlatformAuthenticationValues();

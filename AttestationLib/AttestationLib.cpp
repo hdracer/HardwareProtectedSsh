@@ -457,6 +457,8 @@ bool CAttestationLib::LoadSealedUserKey(ByteVec &serializedKey)
         m_hSrk,
         m_userCreate.outPrivate,
         m_userCreate.outPublic);
+    auto userSigningPubX = m_tpm.ReadPublic(m_hUser);
+    m_userPub = userSigningPubX.outPublic;
     return true;
 }
 
@@ -559,6 +561,13 @@ std::string CAttestationLib::GetUserPubHashHex()
         [&](int c) { ss << std::setw(2) << c; });
 
     return ss.str();
+}
+
+ByteVec CAttestationLib::GetUserPubModulus()
+{
+    TPM2B_PUBLIC_KEY_RSA *pPub =
+        dynamic_cast<TPM2B_PUBLIC_KEY_RSA *> (m_userPub.unique);
+    return pPub->buffer;
 }
 
 //
