@@ -4,7 +4,7 @@ TPMINC_DIR=../TSS.MSR.CPP/Src
 DEST_DIR=../linux
 LIBNAME_BASE=libattestation
 
-CC= gcc
+CC= g++
 ARCH_FLAGS= -m64
 CFLAGS= $(ARCH_FLAGS) -c -fPIC -Wall -Wno-unused-value -Wno-extra -Werror -Wno-unused-parameter -g -std=c++11 -I$(SRC_DIR) -I$(CPPRESTINC_DIR) -I$(TPMINC_DIR)
 LIBNAME=$(LIBNAME_BASE)-x64.so

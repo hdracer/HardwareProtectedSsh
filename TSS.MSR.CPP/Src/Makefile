@@ -1,13 +1,13 @@
 ATTESTATION_DIR=../AttestationLib
 SRC_DIR=./
 DEST_DIR=../../linux
-LIBNAME_BASE=tpmcpplib
+LIBNAME_BASE=libtpmcpp
 
-CC= gcc
+CC= g++
 ARCH_FLAGS= -m64
 CFLAGS= $(ARCH_FLAGS) -c -fPIC -D _TPMCPPLIB -Wall -Wno-unused-value -Wno-extra -Werror -Wno-unused-parameter -g -std=c++11 -I$(SRC_DIR) -I$(ATTESTATION_DIR)
 LIBNAME=$(LIBNAME_BASE)-x64.so
-LIBPATH=$(DEST_DIR)/$(LIBNAME_BASE)-x64.so
+LIBPATH=$(DEST_DIR)/$(LIBNAME_BASE).a
 
 SRCS = AuthSessions.cpp CryptoServices.cpp Helpers.cpp MarshallIn.cpp MarshallOut.cpp Policy.cpp stdafx.cpp TextSerializer.cpp Tpm2.cpp TpmCpp.cpp TpmCustomDefs.cpp TpmDevice.cpp TpmStructureBase.cpp TpmTypes.cpp TpmTypes_skel.cpp dllmain.cpp
 
@@ -27,13 +27,8 @@ Makefile.dep: $(SRCS)
 -include Makefile.dep
 
 TpmCpp: deps $(OBJS)
-	rm -rf $(DEST_DIR)/TpmCppLib.a
-	ar -cq $(DEST_DIR)/TpmCppLib.a $(OBJS)
 	rm -rf $(LIBPATH)
-	g++ -shared -o $(LIBPATH) $(OBJS)
-install:
-	cp $(LIBPATH) /usr/local/lib
-	chmod 0755 /usr/local/lib/$(LIBNAME)
+	ar -cq $(LIBPATH) $(OBJS)
 
 clean:
 	-rm -f *.o
