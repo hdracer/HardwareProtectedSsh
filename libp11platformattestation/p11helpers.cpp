@@ -48,8 +48,14 @@ bool _GetUserHomeDirectory(std::string &userHomeDir)
     return true;
 
 #else
+    const char *homedir;
 
-    userHomeDir.assign("~");
+    if ((homedir = getenv("HOME")) == NULL) 
+    {
+        homedir = getpwuid(getuid())->pw_dir;
+    }
+
+    userHomeDir.assign(homedir);
     return true;
 
 #endif
@@ -91,8 +97,18 @@ bool _GetUserKeysDirectory(std::string &userKeysDir)
 
 #else
     
+    //
+    // Start with the home directory
+    //
+
+    if (false == _GetUserHomeDirectory(userKeysDir))
+        return false;
+
+    stringstream ss;
+    ss << userKeysDir << L"//.strongnet";
+
     // @todo - create the directory
-    userKeysDir.assign("~/.strongnet");
+    userKeysDir = ss.str();
 
 #endif 
 
@@ -131,8 +147,17 @@ bool PhlpGetUserKeyPath(
 
 #else
 
+    //
+    // Start with the home directory
+    //
+
+    if (false == _GetUserHomeDirectory(userKeyPath))
+        return false;
+
     stringstream ss;
-    ss << "~/" << keyName << szUSER_KEYS_EXTENSION;
+    ss << userKeyPath << L"//.strongnet" << keyName << szUSER_KEYS_EXTENSION;
+
+    // @todo - create the directory
     userKeyPath = ss.str();
 
 #endif

@@ -26,6 +26,9 @@
 #include <assert.h>
 #include <string.h>
 #include <typeinfo>
+#include <unistd.h>
+#include <sys/types.h>
+#include <pwd.h>
 #include <boost/filesystem.hpp>
 #define OutputDebugStringA(x) printf("%s", x)
 #define MultiByteToWideChar(a,b,c,d,e,f) assert(d<=f);mbtowc(e,c,d);
