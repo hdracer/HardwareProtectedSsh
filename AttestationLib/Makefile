@@ -11,7 +11,6 @@ LIBNAME=$(LIBNAME_BASE)-x64.so
 LIBPATH=$(DEST_DIR)/$(LIBNAME_BASE)-x64.so
 
 SRCS = AttestationLib.cpp Helpers.cpp
-
 OBJS = AttestationLib.o Helpers.o
 
 

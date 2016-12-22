@@ -26,6 +26,7 @@
 #include <assert.h>
 #include <string.h>
 #include <typeinfo>
+#include <boost/filesystem.hpp>
 #define OutputDebugStringA(x) printf("%s", x)
 #define MultiByteToWideChar(a,b,c,d,e,f) assert(d<=f);mbtowc(e,c,d);
 #define UNREFERENCED_PARAMETER(x) (void)(x)

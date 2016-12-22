@@ -7,6 +7,10 @@
 #include "stdafx.h"
 #include "p11helpers.h"
 
+#ifdef __linux__
+using namespace boost::filesystem;
+#endif
+
 #define szUSER_KEYS_SUBDIRECTORY                        ".AttestedKeys"
 #define szUSER_KEYS_EXTENSION                           ".ak"
 
@@ -15,6 +19,9 @@
 //
 bool _GetUserHomeDirectory(std::string &userHomeDir)
 {
+
+#ifndef __linux__ 
+
     char *szHome = 0;
     size_t cchHome = 0;
 
@@ -39,10 +46,21 @@ bool _GetUserHomeDirectory(std::string &userHomeDir)
     userHomeDir.assign(szHome);
     free(szHome);
     return true;
+
+#else
+
+    userHomeDir.assign("~");
+    return true;
+
+#endif
+
 }
 
 bool _GetUserKeysDirectory(std::string &userKeysDir)
 {
+
+#ifndef __linux__ 
+
     std::tr2::sys::path keysDirPath;
 
     //
@@ -70,6 +88,14 @@ bool _GetUserKeysDirectory(std::string &userKeysDir)
     //
 
     userKeysDir.assign(keysDirPath.string());
+
+#else
+    
+    // @todo - create the directory
+    userKeysDir.assign("~/.strongnet");
+
+#endif 
+
     return true;
 }
 
@@ -77,6 +103,9 @@ bool PhlpGetUserKeyPath(
     const std::string &keyName, 
     std::string &userKeyPath)
 {
+
+#ifndef __linux__
+
     std::tr2::sys::path keyPath;
 
     //
@@ -99,6 +128,14 @@ bool PhlpGetUserKeyPath(
 
     keyPath.concat(szUSER_KEYS_EXTENSION);
     userKeyPath.assign(keyPath.string());
+
+#else
+
+    stringstream ss;
+    ss << "~/" << keyName << szUSER_KEYS_EXTENSION;
+    userKeyPath = ss.str();
+
+#endif
     return true;
 }
 
@@ -131,10 +168,21 @@ bool PhlpEnumerateUserKeyFiles(
     if (false == _GetUserKeysDirectory(userKeysDir))
         return false;
 
+#ifndef __linux__
+
     for (auto& p : ::tr2::sys::directory_iterator(userKeysDir))
     {
         userKeyFiles.push_back(p.path().string());
     }
+
+#else
+
+    for (auto& entry : boost::make_iterator_range(directory_iterator(userKeysDir), {}))
+    {
+        userKeyFiles.push_back(entry.path().string());
+    }
+
+#endif
 
     return true;
 }
@@ -155,8 +203,12 @@ bool PhlpReadFile(
     //
     // Read the contents
     //
-
+#ifndef __linux__
     cbFile = (unsigned int) std::tr2::sys::file_size(fileName);
+#else
+    cbFile = (unsigned int) file_size(fileName);
+#endif
+
     fileData.resize(cbFile);
     fs.read(reinterpret_cast<char*>(fileData.data()), fileData.size());
     fs.close();

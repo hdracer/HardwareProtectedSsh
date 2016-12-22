@@ -6,19 +6,34 @@ DEST_DIR=../linux
 
 CC= g++
 ARCH_FLAGS= -m64
-CFLAGS= $(ARCH_FLAGS) -Wall -Wno-extra -Werror -Wno-unused-parameter -g -std=c++11 -I$(SRC_DIR) -I$(CPPRESTINC_DIR) -I$(TPM_DIR) -I$(ATTESTATION_DIR)
+CFLAGS= $(ARCH_FLAGS) -c -fPIC -Wall -Wno-extra -Werror -Wno-unused-parameter -g -std=c++11 -I$(SRC_DIR) -I$(CPPRESTINC_DIR) -I$(TPM_DIR) -I$(ATTESTATION_DIR)
 LIBBASENAME=libp11platformattestation-x64.so
 LIBNAME=$(DEST_DIR)/$(LIBBASENAME)
+LIBDEST=/usr/lib/x86_64-linux-gnu/$(LIBBASENAME)
 
-all: libp11platformattestation.o
-	$(CC) $(ARCH_FLAGS) -shared -o $(LIBNAME) libp11platformattestation.o -Wl,--whole-archive -L$(DEST_DIR) -lattestation -ltpmcpp -Wl,--no-whole-archive 
+SRCS = libp11platformattestation.cpp p11helpers.cpp 
+OBJS = libp11platformattestation.o p11helpers.o 
 
-libp11platformattestation.o: $(SRC_DIR)/libp11platformattestation.cpp $(SRC_DIR)/*.h
-	$(CC) $(CFLAGS) -fPIC -c $(SRC_DIR)/libp11platformattestation.cpp
+all: LibCpp 
+
+.cpp.o:
+	$(CC) $(CFLAGS) $<
+
+deps: Makefile.dep
+
+Makefile.dep: $(SRCS)
+	$(CC) $(CFLAGS) -MM $^ > ./Makefile.dep
+
+-include Makefile.dep
+
+LibCpp: deps $(OBJS)
+
+	$(CC) $(ARCH_FLAGS) -std=c++11 -shared -o $(LIBNAME) $(OBJS) -Wl,--whole-archive -L$(DEST_DIR) -lattestation -ltpmcpp -Wl,--no-whole-archive -lboost_system -lcrypto -lssl -lcpprest
+
 
 install:
-	cp $(LIBNAME) /usr/local/lib
-	chmod 0755 /usr/local/lib/$(LIBBASENAME)
+	cp $(LIBNAME) $(LIBDEST)
+	chmod 0755 $(LIBDEST)
 
 clean:
 	-rm -f *.o
