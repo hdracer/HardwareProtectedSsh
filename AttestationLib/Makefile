@@ -2,7 +2,7 @@ SRC_DIR=./
 CPPRESTINC_DIR=../../casablanca/Release/include
 TPMINC_DIR=../TSS.MSR.CPP/Src
 DEST_DIR=../linux
-LIBNAME_BASE=attestationlib
+LIBNAME_BASE=libattestation
 
 CC= gcc
 ARCH_FLAGS= -m64
@@ -28,10 +28,10 @@ Makefile.dep: $(SRCS)
 -include Makefile.dep
 
 LibCpp: deps $(OBJS)
-	rm -rf $(DEST_DIR)/attestationlib.a
-	ar -cq $(DEST_DIR)/attestationlib.a $(OBJS)
+	rm -rf $(DEST_DIR)/libattestation.a
+	ar -cq $(DEST_DIR)/libattestation.a $(OBJS)
 	rm -rf $(LIBPATH)
-	g++ -shared -o $(LIBPATH) $(OBJS)
+
 install:
 	cp $(LIBPATH) /usr/local/lib
 	chmod 0755 /usr/local/lib/$(LIBNAME)

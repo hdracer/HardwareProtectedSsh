@@ -32,6 +32,8 @@
 #define _snprintf_s(a,b,c,...) snprintf(a,b,__VA_ARGS__)
 #endif
 
+#include "cpprest/json.h"
+
 #ifndef __linux__
 #pragma warning(once:4251)
 #pragma warning(once:4091)
