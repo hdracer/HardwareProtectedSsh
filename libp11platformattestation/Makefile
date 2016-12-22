@@ -28,7 +28,7 @@ Makefile.dep: $(SRCS)
 
 LibCpp: deps $(OBJS)
 
-	$(CC) $(ARCH_FLAGS) -std=c++11 -shared -o $(LIBNAME) $(OBJS) -Wl,--whole-archive -L$(DEST_DIR) -lattestation -ltpmcpp -Wl,--no-whole-archive -lboost_system -lcrypto -lssl -lcpprest
+	$(CC) $(ARCH_FLAGS) -std=c++11 -shared -o $(LIBNAME) $(OBJS) -Wl,--whole-archive -L$(DEST_DIR) -lattestation -ltpmcpp -Wl,--no-whole-archive -lboost_system -lboost_filesystem -lcrypto -lssl -lcpprest
 
 
 install:
