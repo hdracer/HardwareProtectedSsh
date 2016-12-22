@@ -61,7 +61,7 @@ namespace helpers
         }
         if (0 == wszName)
         {
-            return utiltity::string_t(U("Unknown"));
+            return utility::string_t(U("Unknown"));
         }
 
         ret = utility::conversions::to_string_t(wszName);
