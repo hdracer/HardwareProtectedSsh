@@ -56,7 +56,7 @@ enum class TcpTpmCommands {
 class _DLLEXP_ TpmDevice {
     public:
         TpmDevice();
-        ~TpmDevice();
+        virtual ~TpmDevice();
 
         ///<summary>Send the TPM-formatted byte-stream outBytes to the TPM.  For some devices
         /// this will be a non-blocking operation. For others tis will block until the

@@ -50,8 +50,8 @@ private:
         ActivationData &activationData);
 
 private:
-    std::wstring m_attestationServerHost;
-    std::wstring m_attestationServerScheme;
+    utility::string_t m_attestationServerHost;
+    utility::string_t m_attestationServerScheme;
     TpmDevice *m_pDevice;
     Tpm2 m_tpm;
     CreatePrimaryResponse m_ekCreate;

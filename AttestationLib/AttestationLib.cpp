@@ -6,6 +6,7 @@
 
 #include "stdafx.h"
 #include "AttestationLib.h"
+#include "Helpers.h"
 
 using namespace TpmCpp;
 
@@ -32,57 +33,6 @@ typedef struct _ATTESTED_TPM_KEY
     unsigned int cbAttestationIdentityKey;
     unsigned int cbAttestedUserKey;
 } ATTESTED_TPM_KEY, *PATTESTED_TPM_KEY;
-
-//
-// Helper routines
-//
-
-std::string _bytesToHex(ByteVec &data)
-{
-    std::stringstream ss;
-    ss << std::hex;
-    for (int i = 0; i<data.size(); ++i)
-        ss << std::setw(2) << std::setfill('0') << (int)data[i];
-    return ss.str();
-}
-
-std::wstring _getDeviceName()
-{
-    wchar_t *wszName = 0;
-    size_t cchName = 0;
-    std::wstring strName;
-
-    //
-    // Find a device name
-    //
-
-    _wdupenv_s(&wszName, 0, U("COMPUTERNAME"));
-    if (0 == wszName)
-    {
-        _wdupenv_s(&wszName, 0, U("HOSTNAME"));
-    }
-    if (0 == wszName)
-    {
-        return std::wstring(U(""));
-    }
-
-    //
-    // Return the string to be used
-    //
-
-    strName.assign(wszName);
-    free(wszName);
-    return strName;
-}
-
-std::wstring _getSystemVersion()
-{
-#ifndef __linux__
-    return std::wstring(U("Windows"));
-#else
-    return std::wstring(U("Linux"));
-#endif
-}
 
 
 //
@@ -112,8 +62,13 @@ void CAttestationLib::Initialize(
     // Attestation Web API base address
     //
 
+#ifdef __linux__
+    m_attestationServerHost = helpers::ws2s(attestationServerHost);
+    m_attestationServerScheme = helpers::ws2s(attestationServerScheme);
+#else
     m_attestationServerHost = attestationServerHost;
     m_attestationServerScheme = attestationServerScheme;
+#endif 
 
     // 
     // Tell the TPM2 object where to send commands 
@@ -155,18 +110,18 @@ bool CAttestationLib::CreateAttestationIdentityKey()
     //
 
     MakeEndorsementKey();
-    cout << "EK name: " << _bytesToHex(m_ekPub.GetName()) << endl;
+    cout << "EK name: " << helpers::bytesToHex(m_ekPub.GetName()) << endl;
 
     //
     // Create a restricted key in the storage hierarchy
     //
 
     MakeStoragePrimary();
-    cout << "SRK name: " << _bytesToHex(m_srkPub.GetName()) << endl;
+    cout << "SRK name: " << helpers::bytesToHex(m_srkPub.GetName()) << endl;
     m_hAik = MakeChildSigningKey(m_hSrk, true);
     auto restrictedPubX = m_tpm.ReadPublic(m_hAik);
     m_aikPub = restrictedPubX.outPublic;
-    cout << "AIK name: " << _bytesToHex(m_aikPub.GetName()) << endl;
+    cout << "AIK name: " << helpers::bytesToHex(m_aikPub.GetName()) << endl;
 
     //
     // For an example of pulling EK manufacturer certificates from the 
@@ -671,8 +626,8 @@ bool CAttestationLib::RestRegisterKey(
         utility::conversions::to_base64(clientKeyCreation.ToBuf()));
     reg_req_node[U("KeyQuote")] = web::json::value::string(
         utility::conversions::to_base64(clientKeyQuote.ToBuf()));
-    reg_req_node[U("ClientDeviceName")] = web::json::value::string(_getDeviceName());
-    reg_req_node[U("SystemVersion")] = web::json::value::string(_getSystemVersion());
+    reg_req_node[U("ClientDeviceName")] = web::json::value::string(helpers::getDeviceName());
+    reg_req_node[U("SystemVersion")] = web::json::value::string(helpers::getSystemVersion());
     request.set_body(reg_req_node);
 
     //
