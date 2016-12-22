@@ -105,7 +105,7 @@ bool _GetUserKeysDirectory(std::string &userKeysDir)
         return false;
 
     stringstream ss;
-    ss << userKeysDir << L"//.strongnet";
+    ss << userKeysDir << "//.strongnet";
 
     // @todo - create the directory
     userKeysDir = ss.str();
