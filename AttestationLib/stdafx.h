@@ -45,6 +45,7 @@
 #include <cstdarg>
 #include <typeinfo>
 #include <chrono>
+#include <codecvt>
 #include <system_error>
 
 // cpprest
