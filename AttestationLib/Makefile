@@ -1,7 +1,7 @@
 SRC_DIR=./
 CPPRESTINC_DIR=../../casablanca/Release/include
 TPMINC_DIR=../TSS.MSR.CPP/Src
-DEST_DIR=../../linux
+DEST_DIR=../linux
 LIBNAME_BASE=attestationlib
 
 CC= gcc
