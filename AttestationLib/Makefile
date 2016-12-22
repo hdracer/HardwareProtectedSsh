@@ -32,13 +32,9 @@ LibCpp: deps $(OBJS)
 	ar -cq $(DEST_DIR)/libattestation.a $(OBJS)
 	rm -rf $(LIBPATH)
 
-install:
-	cp $(LIBPATH) /usr/local/lib
-	chmod 0755 /usr/local/lib/$(LIBNAME)
-
 clean:
 	-rm -f *.o
-	-rm -f *.a
+	-rm -f *$(DEST_DIR)/libattestation.a
 
 distclean: clean
 	-rm -f $(LIBPATH)

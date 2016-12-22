@@ -11,7 +11,7 @@ LIBBASENAME=libp11platformattestation-x64.so
 LIBNAME=$(DEST_DIR)/$(LIBBASENAME)
 
 all: libp11platformattestation.o
-	$(CC) $(ARCH_FLAGS) -shared -o $(LIBNAME) libp11platformattestation.o -Wl,--whole-archive -L$(DEST_DIR) -lattestation 
+	$(CC) $(ARCH_FLAGS) -shared -o $(LIBNAME) libp11platformattestation.o -Wl,--whole-archive -L$(DEST_DIR) -lattestation -Wl,--no-whole-archive 
 
 libp11platformattestation.o: $(SRC_DIR)/libp11platformattestation.cpp $(SRC_DIR)/*.h
 	$(CC) $(CFLAGS) -fPIC -c $(SRC_DIR)/libp11platformattestation.cpp
