@@ -28,8 +28,6 @@ using namespace web::http::experimental::listener;
 typedef struct _ATTESTED_TPM_KEY
 {
     unsigned int version;
-    //unsigned int cbEndorsementKey;
-    //unsigned int cbStorageRootKey;
     unsigned int cbAttestationIdentityKey;
     unsigned int cbAttestedUserKey;
 } ATTESTED_TPM_KEY, *PATTESTED_TPM_KEY;
@@ -110,7 +108,8 @@ bool CAttestationLib::CreateAttestationIdentityKey()
     //
 
     MakeEndorsementKey();
-    cout << "EK name: " << helpers::bytesToHex(m_ekPub.GetName()) << endl;
+    cout << "EK hash: " << helpers::bytesToHex(
+        CryptoServices::Hash(TPM_ALG_ID::SHA256, m_ekPub.ToBuf())) << endl;
 
     //
     // Create a restricted key in the storage hierarchy
@@ -251,18 +250,6 @@ bool CAttestationLib::SaveSealedUserKey(ByteVec &serializedKey)
     ByteVec::iterator it;
 
     //
-    // Serialize the EK
-    //
-
-    //ByteVec ekBytes = m_ekCreate.ToBuf();
-
-    //
-    // Serialize the SRK
-    //
-
-    //ByteVec srkBytes = m_srkCreate.ToBuf();
-
-    //
     // Serialize the AIK
     //
 
@@ -278,8 +265,6 @@ bool CAttestationLib::SaveSealedUserKey(ByteVec &serializedKey)
     // Populate the key header
     //
     
-    //FlatKey.cbEndorsementKey = (unsigned int) ekBytes.size();
-    //FlatKey.cbStorageRootKey = (unsigned int) srkBytes.size();
     FlatKey.cbAttestationIdentityKey = (unsigned int) aikBytes.size();
     FlatKey.cbAttestedUserKey = (unsigned int) userBytes.size();
 
@@ -293,22 +278,6 @@ bool CAttestationLib::SaveSealedUserKey(ByteVec &serializedKey)
         (unsigned char *) &FlatKey,
         ((unsigned char *) &FlatKey) + sizeof(FlatKey));
     cbFlatKey += (unsigned int) sizeof(FlatKey);
-
-    /*
-    it = serializedKey.begin();
-    serializedKey.insert(
-        it + cbFlatKey,
-        ekBytes.begin(),
-        ekBytes.end());
-    cbFlatKey += (unsigned int) ekBytes.size();
-
-    it = serializedKey.begin();
-    serializedKey.insert(
-        it + cbFlatKey,
-        srkBytes.begin(),
-        srkBytes.end());
-    cbFlatKey += (unsigned int) srkBytes.size();
-    */
 
     it = serializedKey.begin();
     serializedKey.insert(
@@ -348,31 +317,10 @@ bool CAttestationLib::LoadSealedUserKey(ByteVec &serializedKey)
     cbUsed += sizeof(ATTESTED_TPM_KEY);
 
     if (    serializedKey.size() != 
-            sizeof(ATTESTED_TPM_KEY) + /*pFlatKey->cbEndorsementKey + 
-                pFlatKey->cbStorageRootKey +*/ 
-                pFlatKey->cbAttestationIdentityKey + 
-                pFlatKey->cbAttestedUserKey)
+            sizeof(ATTESTED_TPM_KEY) + 
+            pFlatKey->cbAttestationIdentityKey + 
+            pFlatKey->cbAttestedUserKey)
         return false;
-
-    /*
-    //
-    // Deserialize the EK
-    //
-
-    it = serializedKey.begin();
-    bv.assign(it + cbUsed, it + cbUsed + pFlatKey->cbEndorsementKey);
-    m_ekCreate.FromBuf(bv);
-    cbUsed += pFlatKey->cbEndorsementKey;
-
-    //
-    // Deserialize the SRK
-    //
-
-    it = serializedKey.begin();
-    bv.assign(it + cbUsed, it + cbUsed + pFlatKey->cbStorageRootKey);
-    m_srkCreate.FromBuf(bv);
-    cbUsed += pFlatKey->cbStorageRootKey;
-    */
 
     //
     // Reload the EK
@@ -722,32 +670,10 @@ TPM_HANDLE CAttestationLib::MakeEndorsementKey()
 //
 TPM_HANDLE CAttestationLib::MakeStoragePrimary()
 {
-    /*
-    vector<BYTE> NullVec;
-    TPMT_PUBLIC storagePrimaryTemplate(
-        TPM_FOR_IOT_HASH_ALG,
-        TPMA_OBJECT::decrypt | TPMA_OBJECT::restricted |
-        TPMA_OBJECT::fixedParent | TPMA_OBJECT::fixedTPM |
-        TPMA_OBJECT::sensitiveDataOrigin | TPMA_OBJECT::userWithAuth,
-        NullVec,           // No policy
-        TPMS_RSA_PARMS(    // How child keys should be protected
-            TPMT_SYM_DEF_OBJECT(TPM_ALG_ID::AES, 128, TPM_ALG_ID::CFB),
-            TPMS_NULL_ASYM_SCHEME(), 2048, 65537),
-        TPM2B_PUBLIC_KEY_RSA(NullVec));
-
-    // Create the key
-    m_srkCreate = m_tpm.CreatePrimary(
-        m_tpm._AdminOwner,
-        TPMS_SENSITIVE_CREATE(NullVec, NullVec),
-        storagePrimaryTemplate,
-        NullVec,
-        vector<TPMS_PCR_SELECTION>());
-        */
-
     m_hSrk.handle = 0x81000001;
     auto srkPubX = m_tpm.ReadPublic(m_hSrk);
     m_srkPub = srkPubX.outPublic;
-    return m_hSrk /*m_srkCreate.objectHandle*/;
+    return m_hSrk;
 }
 
 //

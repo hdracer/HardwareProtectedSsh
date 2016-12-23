@@ -1888,7 +1888,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_GenerateKeyPair)(
     // Create the key structure
     //
 
-    CHECK_ALLOC(_InitializeKey(&pKey));
+    CHECK_CKR(_InitializeKey(&pKey));
 
     //
     // Attest

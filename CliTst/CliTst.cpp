@@ -128,9 +128,11 @@ CK_RV _EnumerateFilteredObjects(
         &cItems));
     if (0 == cItems)
     {
-        std::cout << "Warning: no filtered objects were found" << std::endl;
-        CHECK_CKR(CKR_OK);
+        std::cout << "No PKCS#11 object found of class:  " << *((CK_ULONG *) pAttribFilter[0].pValue) << std::endl;
+        goto out;
     }
+
+    std::cout << "Found PKCS#11 object of class:  " << *((CK_ULONG *) pAttribFilter[0].pValue) << std::endl;
 
     //
     // Query attributes sizes
