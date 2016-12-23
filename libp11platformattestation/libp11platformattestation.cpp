@@ -9,6 +9,10 @@
 #include "AttestationLib.h"
 #include "p11helpers.h"
 
+#ifdef __linux__
+    // from tpm library
+    void DllInit();
+#endif
 //
 // Flow macros
 //
