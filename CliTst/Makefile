@@ -4,6 +4,7 @@ CFLAGS = -Wall -c $(DEBUG) -fPIC -D _TPMCPPLIB -std=c++11 -I../TSS.MSR.CPP/Src -
 CFLAGSTST = -Wall $(DEBUG) -std=c++11 -I../TSS.MSR.CPP/Src -I../libp11platformattestation
 LFLAGS = -Wall $(DEBUG)
 DESTDIR= ../linux
+DESTEXE= $(DESTDIR)/CliTst
 
 all: CliTst
 
@@ -19,8 +20,8 @@ Makefile.dep: $(SRCS)
 
 
 CliTst: CliTst.cpp stdafx.cpp 
-	$(CC) $(CFLAGSTST) -o CliTst CliTst.cpp stdafx.cpp -L/usr/lib -L/usr/local/lib -lssl -lcrypto -lboost_system -lcpprest -ldl
+	$(CC) $(CFLAGSTST) -o $(DESTEXE) CliTst.cpp stdafx.cpp -L/usr/lib -L/usr/local/lib -lssl -lcrypto -lboost_system -lcpprest -ldl
 
 clean:
-	rm -rf CliTst
+	rm -rf $(DESTEXE)
 	rm -rf *.o
