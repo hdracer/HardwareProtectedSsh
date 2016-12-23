@@ -6,6 +6,8 @@
 
 #include "stdafx.h"
 
+using namespace std;
+
 //
 // Flow macros
 //
@@ -318,7 +320,7 @@ CK_RV TestPaPkcs11()
 #ifndef __linux__
     if (0 == (hMod = LoadLibraryA("libp11platformattestation.dll")))
 #else
-    if (0 == (hMod = dload("libp11platformattestation-x64.so", RTLD_NOW)))
+    if (0 == (hMod = dlopen("libp11platformattestation-x64.so", RTLD_NOW)))
 #endif
     {
         std::cout << "Failed to load the PKCS#11 library" << std::endl;
@@ -333,7 +335,7 @@ CK_RV TestPaPkcs11()
     if (0 == (pfnCkGetFunctionList = (CK_C_GetFunctionList) GetProcAddress(
         hMod, "C_GetFunctionList")))
 #else
-    if (0 == (pfnCkGetFunctionList = dlsym(hMod, "C_GetFunctionList")))
+    if (0 == (pfnCkGetFunctionList = (CK_C_GetFunctionList) dlsym(hMod, "C_GetFunctionList")))
 #endif
     {
         std::cout << "Failed to find PKCS#11 export symbol C_GetFunctionList" << std::endl;
@@ -483,7 +485,6 @@ out:
 int main(int argc, char *argv[])
 {
 #ifdef __linux__
-DllInit();
 try {
 #endif
 

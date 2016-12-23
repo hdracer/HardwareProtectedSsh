@@ -19,7 +19,7 @@ Makefile.dep: $(SRCS)
 
 
 CliTst: CliTst.cpp stdafx.cpp 
-	$(CC) $(CFLAGSTST) -o CliTst CliTst.cpp stdafx.cpp -L/usr/lib -L/usr/local/lib -lssl -lcrypto -lboost_system -lcpprest
+	$(CC) $(CFLAGSTST) -o CliTst CliTst.cpp stdafx.cpp -L/usr/lib -L/usr/local/lib -lssl -lcrypto -lboost_system -lcpprest -ldl
 
 clean:
 	rm -rf CliTst

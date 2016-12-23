@@ -209,6 +209,11 @@ CK_DEFINE_FUNCTION(CK_RV, C_Initialize)(CK_VOID_PTR pInitArgs)
 
     UNREFERENCED_PARAMETER(pInitArgs);
 
+#ifdef __linux__
+    // initialize tpm library
+    DllInit();
+#endif
+
     p11pa_initialized = CK_TRUE;
     memset(g_rgSessions, 0, sizeof(g_rgSessions[0]));
 
