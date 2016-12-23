@@ -61,7 +61,10 @@
 #include <assert.h>
 #include <string.h>
 #define OutputDebugString wprintf
+#define OutputDebugStringA(x) printf("%s", x)
 #define MultiByteToWideChar(a,b,c,d,e,f) assert(d<=f);mbtowc(e,c,d);
+#define UNREFERENCED_PARAMETER(x) (void)(x)
+#define _snprintf_s(a,b,c,...) snprintf(a,b,__VA_ARGS__)
 #endif
 
 // STL stuff

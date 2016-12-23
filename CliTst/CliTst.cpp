@@ -78,7 +78,7 @@ static void PrintBytes(char *szTitle, CK_BYTE *pbData, CK_ULONG cbData)
 {
     CK_ULONG iByte = 0, iRowItem = 0;
 
-    printf("%s -- %d bytes\n", szTitle, cbData);
+    printf("%s -- %lu bytes\n", szTitle, cbData);
 
     while (iByte < cbData)
     {
@@ -105,7 +105,7 @@ CK_RV _EnumerateFilteredObjects(
     CK_BBOOL fFindInit = false;
     CK_ULONG cItems = 0;
     CK_OBJECT_HANDLE hFoundObject = 0;
-    char *szLabel = 0;
+    const char *szLabel = 0;
 
     //
     // Initialize object enumeration
@@ -197,7 +197,7 @@ CK_RV _EnumerateFilteredObjects(
         }
 
         PrintBytes(
-            szLabel,
+            (char*)szLabel,
             (CK_BYTE *) pFilteredAttribs[iAttrib].pValue,
             pFilteredAttribs[iAttrib].ulValueLen);
     }
