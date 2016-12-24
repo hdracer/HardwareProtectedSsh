@@ -1,5 +1,5 @@
 CC = g++
-DEBUG = -g
+DEBUG = -g -Og
 CFLAGS = -Wall -c $(DEBUG) -fPIC -D _TPMCPPLIB -std=c++11 -I../TSS.MSR.CPP/Src -I../libp11platformattestation
 CFLAGSTST = -Wall $(DEBUG) -std=c++11 -I../TSS.MSR.CPP/Src -I../libp11platformattestation
 LFLAGS = -Wall $(DEBUG)

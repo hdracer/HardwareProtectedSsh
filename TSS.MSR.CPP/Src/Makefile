@@ -5,7 +5,9 @@ LIBNAME_BASE=libtpmcpp
 
 CC= g++
 ARCH_FLAGS= -m64
-CFLAGS= $(ARCH_FLAGS) -c -fPIC -D _TPMCPPLIB -Wall -Wno-unused-value -Wno-extra -Werror -Wno-unused-parameter -g -std=c++11 -I$(SRC_DIR) -I$(ATTESTATION_DIR)
+DEBUG = -Og -g
+CFLAGS= $(ARCH_FLAGS) -c $(DEBUG) -fPIC -D _TPMCPPLIB -Wall -Wno-unused-value -Wno-extra -Werror -Wno-unused-parameter -std=c++11 -I$(SRC_DIR) 
+
 LIBNAME=$(LIBNAME_BASE)-x64.so
 LIBPATH=$(DEST_DIR)/$(LIBNAME_BASE).a
 
@@ -32,7 +34,7 @@ TpmCpp: deps $(OBJS)
 
 clean:
 	-rm -f *.o
-	-rm -f *.a
+	-rm -f $(LIBPATH)
 
 distclean: clean
 	-rm -f $(LIBPATH)
