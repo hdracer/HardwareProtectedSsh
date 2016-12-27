@@ -105,7 +105,7 @@ bool _GetUserKeysDirectory(std::string &userKeysDir)
         return false;
 
     stringstream ss;
-    ss << userKeysDir << "//.strongnet";
+    ss << userKeysDir << "/.strongnet";
 
     // @todo - create the directory
     userKeysDir = ss.str();
@@ -155,7 +155,7 @@ bool PhlpGetUserKeyPath(
         return false;
 
     stringstream ss;
-    ss << userKeyPath << L"//.strongnet" << keyName << szUSER_KEYS_EXTENSION;
+    ss << userKeyPath << "/.strongnet/" << keyName << szUSER_KEYS_EXTENSION;
 
     // @todo - create the directory
     userKeyPath = ss.str();

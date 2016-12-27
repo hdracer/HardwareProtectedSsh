@@ -1241,7 +1241,6 @@ CK_DEFINE_FUNCTION(CK_RV, C_FindObjects)(
 
     //
     // Return object handles based on find type
-    //
 
     switch (pSession->findObjectClass)
     {
