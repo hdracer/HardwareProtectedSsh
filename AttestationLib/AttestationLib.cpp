@@ -367,6 +367,16 @@ bool CAttestationLib::CheckUserKeyWhitelist()
     return RestLookupRegisteredKey(m_userPub);
 }
 
+bool CAttestationLib::VerifySignature(const ByteVec &hashBytes, const ByteVec &signatureBytes)
+{
+    TPMS_SIGNATURE_RSASSA rsaSsaSig;
+    rsaSsaSig.hash = TPM_USER_HASH_ALG;
+    rsaSsaSig.sig = signatureBytes;
+
+    return m_userPub.ValidateSignature(
+        hashBytes, rsaSsaSig);
+}
+
 bool CAttestationLib::SignHash(const ByteVec &hashBytes, ByteVec &signatureBytes)
 {
     //

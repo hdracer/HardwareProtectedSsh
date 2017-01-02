@@ -359,7 +359,7 @@ CK_RV TestPaPkcs11()
     //
 
     CHECK_CKR(pCkFunctionList->C_GetInfo(&CkInfo));
-    std::cout << "Using CryptoKi provider " << CkInfo.libraryDescription << std::endl;
+    std::cout << "Using CryptoKi provider: " << CkInfo.libraryDescription << std::endl;
 
     //
     // List slots
@@ -459,8 +459,20 @@ CK_RV TestPaPkcs11()
     //
     // Verify the signature
     //
-    
-    // TODO
+
+    CHECK_CKR(pCkFunctionList->C_VerifyInit(
+        hSession,
+        &Mechanism,
+        hPrivateKey));
+
+    CHECK_CKR(pCkFunctionList->C_Verify(
+        hSession,
+        rgbHash,
+        sizeof(rgbHash),
+        pbSignature,
+        cbSignature));
+
+    std::cout << "Successfully signed and verified hash" << std::endl;
 
     //
     // Enumerate keys and certificates

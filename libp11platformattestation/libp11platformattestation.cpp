@@ -1454,8 +1454,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_SignInit)(
     {
         CHECK_CKR(CKR_CRYPTOKI_NOT_INITIALIZED);
     }
-    if ((P11PA_OPERATION_NONE != p11pa_active_operation) &&
-        (P11PA_OPERATION_ENCRYPT != p11pa_active_operation))
+    if (P11PA_OPERATION_NONE != p11pa_active_operation)
     {
         CHECK_CKR(CKR_OPERATION_ACTIVE);
     }
@@ -1569,64 +1568,17 @@ out:
 
 CK_DEFINE_FUNCTION(CK_RV, C_SignUpdate)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_SIGN != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pPart)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_SignFinal)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG_PTR pulSignatureLen)
 {
-    CK_BYTE signature[10] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09 };
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((P11PA_OPERATION_SIGN != p11pa_active_operation) &&
-        (P11PA_OPERATION_SIGN_ENCRYPT != p11pa_active_operation))
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pulSignatureLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (NULL != pSignature)
-    {
-        if (sizeof(signature) > *pulSignatureLen)
-        {
-            return CKR_BUFFER_TOO_SMALL;
-        }
-        else
-        {
-            memcpy(pSignature, signature, sizeof(signature));
-
-            if (P11PA_OPERATION_SIGN == p11pa_active_operation)
-                p11pa_active_operation = P11PA_OPERATION_NONE;
-            else
-                p11pa_active_operation = P11PA_OPERATION_ENCRYPT;
-        }
-    }
-
-    *pulSignatureLen = sizeof(signature);
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
@@ -1648,135 +1600,121 @@ CK_DEFINE_FUNCTION(CK_RV, C_SignRecover)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR
 
 CK_DEFINE_FUNCTION(CK_RV, C_VerifyInit)(CK_SESSION_HANDLE hSession, CK_MECHANISM_PTR pMechanism, CK_OBJECT_HANDLE hKey)
 {
+    CK_RV result = CKR_OK;
+
+    //
+    // Check parameters
+    //
+
     if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((P11PA_OPERATION_NONE != p11pa_active_operation) &&
-        (P11PA_OPERATION_DECRYPT != p11pa_active_operation))
-        return CKR_OPERATION_ACTIVE;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pMechanism)
-        return CKR_ARGUMENTS_BAD;
-
-    if ((CKM_RSA_PKCS == pMechanism->mechanism) || (CKM_SHA256_RSA_PKCS == pMechanism->mechanism))
     {
-        if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
-            return CKR_MECHANISM_PARAM_INVALID;
-
-        if (P11PA_OBJECT_HANDLE_PUBLIC_KEY != hKey)
-            return CKR_KEY_TYPE_INCONSISTENT;
+        CHECK_CKR(CKR_CRYPTOKI_NOT_INITIALIZED);
     }
-    else
+    if (P11PA_OPERATION_NONE != p11pa_active_operation)
     {
-        return CKR_MECHANISM_INVALID;
+        CHECK_CKR(CKR_OPERATION_ACTIVE);
+    }
+    if (0 == hSession)
+    {
+        CHECK_CKR(CKR_SESSION_HANDLE_INVALID);
+    }
+    if (0 == pMechanism)
+    {
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
+    }
+    if (CKM_RSA_PKCS != pMechanism->mechanism &&
+        CKM_SHA256_RSA_PKCS != pMechanism->mechanism)
+    {
+        CHECK_CKR(CKR_MECHANISM_INVALID);
+    }
+    if (0 != pMechanism->pParameter || 0 != pMechanism->ulParameterLen)
+    {
+        CHECK_CKR(CKR_MECHANISM_PARAM_INVALID);
+    }
+    if (0 == hKey)
+    {
+        CHECK_CKR(CKR_KEY_HANDLE_INVALID);
     }
 
-    if (P11PA_OPERATION_NONE == p11pa_active_operation)
-        p11pa_active_operation = P11PA_OPERATION_VERIFY;
-    else
-        p11pa_active_operation = P11PA_OPERATION_DECRYPT_VERIFY;
+    //
+    // Update the session
+    //
 
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    p11pa_active_operation = P11PA_OPERATION_VERIFY;
+
+out:
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_Verify)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData, CK_ULONG ulDataLen, CK_BYTE_PTR pSignature, CK_ULONG ulSignatureLen)
 {
-    CK_BYTE signature[10] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09 };
+    CK_RV result = CKR_OK;
+    PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
+    ByteVec signatureBytes;
+
+    //
+    // Check parameters
+    //
 
     if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
+    {
+        CHECK_CKR(CKR_CRYPTOKI_NOT_INITIALIZED);
+    }
     if (P11PA_OPERATION_VERIFY != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pData)
-        return CKR_ARGUMENTS_BAD;
-
+    {
+        CHECK_CKR(CKR_OPERATION_NOT_INITIALIZED);
+    }
+    if (0 == hSession)
+    {
+        CHECK_CKR(CKR_SESSION_HANDLE_INVALID);
+    }
+    if (0 == pSession->pCurrentKey)
+    {
+        CHECK_CKR(CKR_KEY_HANDLE_INVALID);
+    }
+    if (0 == pData || 0 == pSignature)
+    {
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
+    }
     if (0 >= ulDataLen)
-        return CKR_ARGUMENTS_BAD;
+    {
+        CHECK_CKR(CKR_ARGUMENTS_BAD);
+    }
 
-    if (NULL == pSignature)
-        return CKR_ARGUMENTS_BAD;
+    //
+    // Verify the signature
+    //
 
-    if (0 >= ulSignatureLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (sizeof(signature) != ulSignatureLen)
-        return CKR_SIGNATURE_LEN_RANGE;
-
-    if (0 != memcmp(pSignature, signature, sizeof(signature)))
-        return CKR_SIGNATURE_INVALID;
+    if (false == pSession->pCurrentKey->pAttestationLib->VerifySignature(
+        ByteVec(pData, pData + ulDataLen),
+        ByteVec(pSignature, pSignature + ulSignatureLen)))
+    {
+        CHECK_CKR(CKR_SIGNATURE_INVALID);
+    }
 
     p11pa_active_operation = P11PA_OPERATION_NONE;
 
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+out:
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_VerifyUpdate)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pPart, CK_ULONG ulPartLen)
 {
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if (P11PA_OPERATION_VERIFY != p11pa_active_operation)
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pPart)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulPartLen)
-        return CKR_ARGUMENTS_BAD;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 
 CK_DEFINE_FUNCTION(CK_RV, C_VerifyFinal)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pSignature, CK_ULONG ulSignatureLen)
 {
-    CK_BYTE signature[10] = { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09 };
-
-    if (CK_FALSE == p11pa_initialized)
-        return CKR_CRYPTOKI_NOT_INITIALIZED;
-
-    if ((P11PA_OPERATION_VERIFY != p11pa_active_operation) &&
-        (P11PA_OPERATION_DECRYPT_VERIFY != p11pa_active_operation))
-        return CKR_OPERATION_NOT_INITIALIZED;
-
-    if ((CK_FALSE == p11pa_session_opened) || (P11PA_SESSION_ID != hSession))
-        return CKR_SESSION_HANDLE_INVALID;
-
-    if (NULL == pSignature)
-        return CKR_ARGUMENTS_BAD;
-
-    if (0 >= ulSignatureLen)
-        return CKR_ARGUMENTS_BAD;
-
-    if (sizeof(signature) != ulSignatureLen)
-        return CKR_SIGNATURE_LEN_RANGE;
-
-    if (0 != memcmp(pSignature, signature, sizeof(signature)))
-        return CKR_SIGNATURE_INVALID;
-
-    if (P11PA_OPERATION_VERIFY == p11pa_active_operation)
-        p11pa_active_operation = P11PA_OPERATION_NONE;
-    else
-        p11pa_active_operation = P11PA_OPERATION_DECRYPT;
-
-    LOG_CALL(__FUNCTION__, 0);
-    return CKR_OK;
+    CK_RV result = CKR_FUNCTION_NOT_SUPPORTED;
+    LOG_CALL(__FUNCTION__, result);
+    return result;
 }
 
 

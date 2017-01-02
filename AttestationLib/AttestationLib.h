@@ -28,6 +28,7 @@ public:
     void ShowTpmCapabilities();
     bool SignAndVerifyMessage(const std::string &message);
     bool SignHash(const ByteVec &hashBytes, ByteVec &signatureBytes);
+    bool VerifySignature(const ByteVec &hashBytes, const ByteVec &signatureBytes);
     ByteVec GetEkPubHashBytes();
     std::string GetUserPubHashHex();
     ByteVec GetUserPubModulus();
