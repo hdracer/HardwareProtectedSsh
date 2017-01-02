@@ -20,7 +20,8 @@ using namespace web::http::client;
 using namespace web::http::experimental;
 using namespace web::http::experimental::listener;
 
-#define TPM_FOR_IOT_HASH_ALG TPM_ALG_ID::SHA1
+#define TPM_RESTRICTED_HASH_ALG TPM_ALG_ID::SHA1
+#define TPM_USER_HASH_ALG TPM_ALG_ID::SHA256
 
 //
 // Structure for flat key storage header
@@ -46,7 +47,6 @@ CAttestationLib::~CAttestationLib(void)
 {
     m_tpm.FlushContext(m_hUser);
     m_tpm.FlushContext(m_hAik);
-    m_tpm.FlushContext(m_hSrk);
     m_tpm.FlushContext(m_hEk);
 
     delete m_pDevice;
@@ -115,9 +115,7 @@ bool CAttestationLib::CreateAttestationIdentityKey()
     // Create a restricted key in the storage hierarchy
     //
 
-    MakeStoragePrimary();
-    cout << "SRK name: " << helpers::bytesToHex(m_srkPub.GetName()) << endl;
-    m_hAik = MakeChildSigningKey(m_hSrk, true);
+    m_hAik = MakeChildSigningKey(m_hEk, true);
     auto restrictedPubX = m_tpm.ReadPublic(m_hAik);
     m_aikPub = restrictedPubX.outPublic;
     cout << "AIK name: " << helpers::bytesToHex(m_aikPub.GetName()) << endl;
@@ -165,7 +163,8 @@ bool CAttestationLib::CreateSealedUserKey()
     // Read PCR data
     //
 
-    auto pcrsToQuote = TPMS_PCR_SELECTION::GetSelectionArray(TPM_FOR_IOT_HASH_ALG, 7);
+    auto pcrsToQuote = TPMS_PCR_SELECTION::GetSelectionArray(
+        TPM_USER_HASH_ALG, 7);
     PCR_ReadResponse pcrVals = m_tpm.PCR_Read(pcrsToQuote);
 
     //
@@ -173,13 +172,17 @@ bool CAttestationLib::CreateSealedUserKey()
     //
 
     QuoteResponse quote = m_tpm.Quote(
-        m_hAik, m_decryptedTpmSecret, TPMS_NULL_SIG_SCHEME(), pcrsToQuote);
+        m_hAik, 
+        m_decryptedTpmSecret, 
+        TPMS_SCHEME_RSASSA(TPM_USER_HASH_ALG), 
+        pcrsToQuote);
 
     //
     // Create a user signing-only key in the storage hierarchy. 
     //
 
-    TPMT_PUBLIC templ(TPM_FOR_IOT_HASH_ALG,
+    TPMT_PUBLIC templ(
+        TPM_USER_HASH_ALG,
         TPMA_OBJECT::sign |           // Key attributes
         TPMA_OBJECT::fixedParent |
         TPMA_OBJECT::fixedTPM |
@@ -188,7 +191,7 @@ bool CAttestationLib::CreateSealedUserKey()
         NullVec,                      // No policy
         TPMS_RSA_PARMS(
             TPMT_SYM_DEF_OBJECT(TPM_ALG_ID::_NULL, 0, TPM_ALG_ID::_NULL),
-            TPMS_SCHEME_RSASSA(TPM_FOR_IOT_HASH_ALG), 2048, 65537),
+            TPMS_SCHEME_RSASSA(TPM_USER_HASH_ALG), 2048, 65537),
         TPM2B_PUBLIC_KEY_RSA(NullVec));
 
     //
@@ -196,7 +199,7 @@ bool CAttestationLib::CreateSealedUserKey()
     //
 
     m_userCreate = m_tpm.Create(
-        m_hSrk,
+        m_hEk,
         TPMS_SENSITIVE_CREATE(NullVec, NullVec),
         templ,
         NullVec,
@@ -207,7 +210,7 @@ bool CAttestationLib::CreateSealedUserKey()
     //
 
     m_hUser = m_tpm.Load(
-        m_hSrk,
+        m_hEk,
         m_userCreate.outPrivate,
         m_userCreate.outPublic);
     auto userSigningPubX = m_tpm.ReadPublic(m_hUser);
@@ -329,12 +332,6 @@ bool CAttestationLib::LoadSealedUserKey(ByteVec &serializedKey)
     MakeEndorsementKey();
 
     //
-    // Reload the SRK
-    //
-
-    MakeStoragePrimary();
-
-    //
     // Deserialize the AIK
     //
 
@@ -357,7 +354,7 @@ bool CAttestationLib::LoadSealedUserKey(ByteVec &serializedKey)
     //
 
     m_hUser = m_tpm.Load(
-        m_hSrk,
+        m_hEk,
         m_userCreate.outPrivate,
         m_userCreate.outPublic);
     auto userSigningPubX = m_tpm.ReadPublic(m_hUser);
@@ -413,7 +410,7 @@ bool CAttestationLib::SignAndVerifyMessage(const std::string &message)
     //
 
     ByteVec messageHash = TPMT_HA::FromHashOfString(
-        TPM_FOR_IOT_HASH_ALG, message).digest;
+        TPM_USER_HASH_ALG, message).digest;
 
     //
     // Sign a message with the user key
@@ -641,7 +638,8 @@ bool CAttestationLib::RestLookupRegisteredKey(
 TPM_HANDLE CAttestationLib::MakeEndorsementKey()
 {
     vector<BYTE> NullVec;
-    TPMT_PUBLIC storagePrimaryTemplate(TPM_FOR_IOT_HASH_ALG,
+    TPMT_PUBLIC storagePrimaryTemplate(
+        TPM_RESTRICTED_HASH_ALG,
         TPMA_OBJECT::decrypt | TPMA_OBJECT::restricted |
         TPMA_OBJECT::fixedParent | TPMA_OBJECT::fixedTPM |
         TPMA_OBJECT::sensitiveDataOrigin | TPMA_OBJECT::userWithAuth,
@@ -666,17 +664,6 @@ TPM_HANDLE CAttestationLib::MakeEndorsementKey()
 }
 
 //
-// Open the Storage Root Key
-//
-TPM_HANDLE CAttestationLib::MakeStoragePrimary()
-{
-    m_hSrk.handle = 0x81000001;
-    auto srkPubX = m_tpm.ReadPublic(m_hSrk);
-    m_srkPub = srkPubX.outPublic;
-    return m_hSrk;
-}
-
-//
 // Create an RSA signing key, optionally restricted (i.e., an AIK)
 //
 TPM_HANDLE CAttestationLib::MakeChildSigningKey(
@@ -691,14 +678,14 @@ TPM_HANDLE CAttestationLib::MakeChildSigningKey(
     }
 
     TPMT_PUBLIC templ(
-        TPM_FOR_IOT_HASH_ALG,
+        TPM_USER_HASH_ALG,
         TPMA_OBJECT::sign | TPMA_OBJECT::fixedParent |
         TPMA_OBJECT::fixedTPM | TPMA_OBJECT::sensitiveDataOrigin |
         TPMA_OBJECT::userWithAuth | restrictedAttribute,
         NullVec,  // No policy
         TPMS_RSA_PARMS(
             TPMT_SYM_DEF_OBJECT(TPM_ALG_ID::_NULL, 0, TPM_ALG_ID::_NULL),
-            TPMS_SCHEME_RSASSA(TPM_FOR_IOT_HASH_ALG), 2048, 65537), // PKCS1.5
+            TPMS_SCHEME_RSASSA(TPM_USER_HASH_ALG), 2048, 65537), // PKCS1.5
         TPM2B_PUBLIC_KEY_RSA(NullVec));
 
     m_aikCreate = m_tpm.Create(

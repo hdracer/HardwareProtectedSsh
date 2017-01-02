@@ -57,8 +57,8 @@ private:
     CreatePrimaryResponse m_ekCreate;
     TPM_HANDLE m_hEk;
     TPMT_PUBLIC m_ekPub;
-    TPM_HANDLE m_hSrk;
-    TPMT_PUBLIC m_srkPub;
+    //TPM_HANDLE m_hSrk;
+    //TPMT_PUBLIC m_srkPub;
     CreateResponse m_aikCreate;
     TPM_HANDLE m_hAik;
     TPMT_PUBLIC m_aikPub;

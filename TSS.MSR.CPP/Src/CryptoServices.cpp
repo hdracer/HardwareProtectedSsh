@@ -346,7 +346,7 @@ _cpri__ValidateSignatureRSA(RSA_KEY         *key,       // IN: key to use
     }
 
     RSA *keyX;
-
+    int hashType = 0;
     BIGNUM *bn_mod = NULL;
     BIGNUM *bn_exp = NULL;
     BYTE exponent[] {1, 0, 1};
@@ -360,7 +360,22 @@ _cpri__ValidateSignatureRSA(RSA_KEY         *key,       // IN: key to use
     keyX->p = NULL;
     keyX->q = NULL;
 
-    int res = RSA_verify(NID_sha1, hIn, hInSize, sigIn, sigInSize, keyX);
+    switch (hashAlg)
+    {
+    case TPM_ALG_ID::SHA1:
+        hashType = NID_sha1;
+        break;
+    case TPM_ALG_ID::SHA256:
+        hashType = NID_sha256;
+        break;
+    case TPM_ALG_ID::SHA512:
+        hashType = NID_sha512;
+        break;
+    default:
+        return CRYPT_FAIL;
+    }
+
+    int res = RSA_verify(hashType, hIn, hInSize, sigIn, sigInSize, keyX);
 
     RSA_free(keyX);
 
@@ -369,7 +384,6 @@ _cpri__ValidateSignatureRSA(RSA_KEY         *key,       // IN: key to use
     }
 
     return CRYPT_FAIL;
-
 }
 
 CRYPT_RESULT RsaEncrypt(RSA_KEY     *key,           // IN: key to use

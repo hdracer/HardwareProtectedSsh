@@ -456,7 +456,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetMechanismList)(CK_SLOT_ID slotID, CK_MECHANISM_TY
     CK_MECHANISM_TYPE Mechanisms[] = {
         CKM_RSA_PKCS_KEY_PAIR_GEN,
         CKM_RSA_PKCS,
-        CKM_SHA1_RSA_PKCS
+        CKM_SHA256_RSA_PKCS
     };
 
     //
@@ -546,7 +546,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetMechanismInfo)(CK_SLOT_ID slotID, CK_MECHANISM_TY
         pInfo->flags = CKF_SIGN | CKF_VERIFY;
         break;
 
-    case CKM_SHA1_RSA_PKCS:
+    case CKM_SHA256_RSA_PKCS:
         pInfo->ulMinKeySize = 1024;
         pInfo->ulMaxKeySize = 1024;
         pInfo->flags = CKF_SIGN | CKF_VERIFY;
@@ -1468,7 +1468,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_SignInit)(
         CHECK_CKR(CKR_ARGUMENTS_BAD);
     }
     if (CKM_RSA_PKCS != pMechanism->mechanism && 
-        CKM_SHA1_RSA_PKCS != pMechanism->mechanism)
+        CKM_SHA256_RSA_PKCS != pMechanism->mechanism)
     {
         CHECK_CKR(CKR_MECHANISM_INVALID);
     }
@@ -1661,7 +1661,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_VerifyInit)(CK_SESSION_HANDLE hSession, CK_MECHANISM
     if (NULL == pMechanism)
         return CKR_ARGUMENTS_BAD;
 
-    if ((CKM_RSA_PKCS == pMechanism->mechanism) || (CKM_SHA1_RSA_PKCS == pMechanism->mechanism))
+    if ((CKM_RSA_PKCS == pMechanism->mechanism) || (CKM_SHA256_RSA_PKCS == pMechanism->mechanism))
     {
         if ((NULL != pMechanism->pParameter) || (0 != pMechanism->ulParameterLen))
             return CKR_MECHANISM_PARAM_INVALID;

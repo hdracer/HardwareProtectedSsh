@@ -104,7 +104,7 @@ CK_RV _EnumerateFilteredObjects(
     CK_ULONG cFilteredAttribs)
 {
     CK_RV result = CKR_OK;
-    CK_BBOOL fFindInit = false;
+    CK_BBOOL fFindInit = CK_FALSE;
     CK_ULONG cItems = 0;
     CK_OBJECT_HANDLE hFoundObject = 0;
     const char *szLabel = 0;
@@ -117,7 +117,7 @@ CK_RV _EnumerateFilteredObjects(
         hSession,
         pAttribFilter,
         cFilter));
-    fFindInit = true;
+    fFindInit = CK_TRUE;
 
     //
     // Try for one object
@@ -205,7 +205,7 @@ CK_RV _EnumerateFilteredObjects(
     }
 
 out:
-    if (true == fFindInit)
+    if (CK_TRUE == fFindInit)
     {
         //
         // Clean-up object enumeration state
@@ -307,7 +307,7 @@ CK_RV TestPaPkcs11()
     CK_MECHANISM Mechanism = { 0 };
     CK_OBJECT_HANDLE hPublicKey = 0;
     CK_OBJECT_HANDLE hPrivateKey = 0;
-    CK_BYTE rgbHash[20];
+    CK_BYTE rgbHash[32];
     CK_BYTE *pbSignature = 0;
     CK_ULONG cbSignature = 0;
 
