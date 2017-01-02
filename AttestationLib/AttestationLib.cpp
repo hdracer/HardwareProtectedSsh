@@ -379,14 +379,21 @@ bool CAttestationLib::VerifySignature(const ByteVec &hashBytes, const ByteVec &s
 
 bool CAttestationLib::SignHash(const ByteVec &hashBytes, ByteVec &signatureBytes)
 {
+    if (hashBytes.size() < CryptoServices::HashLength(TPM_USER_HASH_ALG))
+    {
+        return false;
+    }
+
     //
     // Sign a message with the user key
     //
 
     TpmCpp::SignResponse signature = m_tpm.Sign(
         m_hUser,
-        hashBytes,
-        TPMS_NULL_SIG_SCHEME(),
+        ByteVec(
+            hashBytes.data() + hashBytes.size() - CryptoServices::HashLength(TPM_USER_HASH_ALG),
+            hashBytes.data() + hashBytes.size()),
+        TPMS_SCHEME_RSASSA(TPM_USER_HASH_ALG),
         TPMT_TK_HASHCHECK::NullTicket());
     if (false == m_tpm._LastOperationSucceeded())
     {
@@ -429,7 +436,7 @@ bool CAttestationLib::SignAndVerifyMessage(const std::string &message)
     auto signature = m_tpm.Sign(
         m_hUser,
         messageHash,
-        TPMS_NULL_SIG_SCHEME(),
+        TPMS_SCHEME_RSASSA(TPM_USER_HASH_ALG),
         TPMT_TK_HASHCHECK::NullTicket());
 
     //
