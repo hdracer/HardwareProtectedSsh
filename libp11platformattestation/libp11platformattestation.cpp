@@ -1532,6 +1532,17 @@ CK_DEFINE_FUNCTION(CK_RV, C_Sign)(CK_SESSION_HANDLE hSession, CK_BYTE_PTR pData,
     }
 
     //
+    // Support length check
+    //
+
+    if (NULL == pSignature)
+    {
+        signatureBytes = pSession->pCurrentKey->pAttestationLib->GetUserPubModulus();
+        *pulSignatureLen = (CK_ULONG)signatureBytes.size();
+        goto out;
+    }
+
+    //
     // Sign the data
     //
 

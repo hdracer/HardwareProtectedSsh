@@ -307,7 +307,7 @@ CK_RV TestPaPkcs11()
     CK_MECHANISM Mechanism = { 0 };
     CK_OBJECT_HANDLE hPublicKey = 0;
     CK_OBJECT_HANDLE hPrivateKey = 0;
-    CK_BYTE rgbHash[32];
+    CK_BYTE rgbHash[32] = { 0 };
     CK_BYTE *pbSignature = 0;
     CK_ULONG cbSignature = 0;
 
