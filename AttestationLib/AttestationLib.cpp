@@ -37,7 +37,7 @@ typedef struct _ATTESTED_TPM_KEY
 // Write hex bytes to console output
 //
 #define CROW                                                16
-static void PrintBytes(char *szTitle, unsigned char *pbData, unsigned long cbData)
+static void PrintBytes(const char *szTitle, unsigned char *pbData, unsigned long cbData)
 {
     unsigned long iByte = 0, iRowItem = 0;
 
@@ -417,7 +417,7 @@ bool CAttestationLib::SignHash(const ByteVec &hashBytes, ByteVec &signatureBytes
         hashToSign,
         TPMS_SCHEME_RSASSA(TPM_USER_HASH_ALG),
         TPMT_TK_HASHCHECK::NullTicket());
-    PrintBytes("CAttestationLib::SignHash - Hash", hashToSign.data(), hashToSign.size());
+    PrintBytes("CAttestationLib::SignHash - Hash", hashToSign.data(), (unsigned long) hashToSign.size());
     if (false == m_tpm._LastOperationSucceeded())
     {
         //
@@ -440,7 +440,7 @@ bool CAttestationLib::SignHash(const ByteVec &hashBytes, ByteVec &signatureBytes
     {
         signatureBytes.push_back(pSig->sig[iByte]);
     }
-    PrintBytes("CAttestationLib::SignHash - Signature", signatureBytes.data(), signatureBytes.size());
+    PrintBytes("CAttestationLib::SignHash - Signature", signatureBytes.data(), (unsigned long) signatureBytes.size());
     return true;
 }
 
