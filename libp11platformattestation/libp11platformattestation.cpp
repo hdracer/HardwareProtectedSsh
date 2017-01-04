@@ -1012,6 +1012,7 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetAttributeValue)(
 {
     CK_RV result = CKR_OK;
     PP11PA_SESSION pSession = _SessionPointerFromHandle(hSession);
+    CK_BYTE rgbExponent[]{ 1, 0, 1 };
     CK_ULONG ulAttr = 0;
     CK_VOID_PTR pvAttr = 0;
     CK_ULONG cbAttr = 0;
@@ -1076,9 +1077,8 @@ CK_DEFINE_FUNCTION(CK_RV, C_GetAttributeValue)(
             break;
 
         case CKA_PUBLIC_EXPONENT:
-            ulAttr = 0x10001;
-            pvAttr = &ulAttr;
-            cbAttr = sizeof(ulAttr);
+            pvAttr = rgbExponent;
+            cbAttr = sizeof(rgbExponent);
             break;
 
         default:
