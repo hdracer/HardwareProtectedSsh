@@ -137,7 +137,7 @@ class InByteBuf {
         UINT32 GetValueType(int numBytes) {
             switch (numBytes) {
                 case 1:
-                    byte x1;
+                    unsigned char x1;
                     *this >> x1;
                     return (UINT32)x1;
 
@@ -200,7 +200,7 @@ class Helpers {
 std::string GetEnumString(UINT32 val, class StructMarshallInfo& tp);
 
 ///<summary> Output a formatted byte-stream</summary>
-inline ostream& operator<<(ostream& s, const vector<byte>& b)
+inline ostream& operator<<(ostream& s, const vector<unsigned char>& b)
 {
     for (UINT32 j = 0; j < b.size(); j++) {
         s << setw(2) << setfill('0') << hex << (UINT32)b[j];

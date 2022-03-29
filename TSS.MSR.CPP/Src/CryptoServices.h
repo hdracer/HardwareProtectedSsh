@@ -19,13 +19,13 @@ class _DLLEXP_ CryptoServices {
         ///<summary>TSS.C++ default RNG. TSS.C++ pulls all random numbers through the 
         /// Tpm2 class. By default this method is called, but the programmer can register
         /// their own local RNG instead.</summary>
-        static std::vector<byte> GetRand(size_t numBytes);
+        static std::vector<unsigned char> GetRand(size_t numBytes);
 
         ///<summary>Hash</summary>
-        static std::vector<byte> Hash(TPM_ALG_ID hashAlg, std::vector<BYTE> toHash);
+        static std::vector<unsigned char> Hash(TPM_ALG_ID hashAlg, std::vector<BYTE> toHash);
 
         ///<summary>HMAC</summary>
-        static std::vector<byte> HMAC(TPM_ALG_ID hashAlg,
+        static std::vector<unsigned char> HMAC(TPM_ALG_ID hashAlg,
                                       std::vector<BYTE> key,
                                       std::vector<BYTE> toHash);
 

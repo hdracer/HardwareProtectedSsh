@@ -67,7 +67,7 @@ bool _GetUserKeysDirectory(std::string &userKeysDir)
 
 #ifndef __linux__ 
 
-    std::tr2::sys::path keysDirPath;
+    std::filesystem::path keysDirPath;
 
     //
     // Start with the home directory
@@ -87,7 +87,7 @@ bool _GetUserKeysDirectory(std::string &userKeysDir)
     // Ensure the directory tree exists
     //
 
-    std::tr2::sys::create_directories(keysDirPath);
+    std::filesystem::create_directories(keysDirPath);
 
     //
     // Return the path
@@ -122,7 +122,7 @@ bool PhlpGetUserKeyPath(
 
 #ifndef __linux__
 
-    std::tr2::sys::path keyPath;
+    std::filesystem::path keyPath;
 
     //
     // Start with the keys directory
@@ -195,7 +195,7 @@ bool PhlpEnumerateUserKeyFiles(
 
 #ifndef __linux__
 
-    for (auto& p : ::tr2::sys::directory_iterator(userKeysDir))
+    for (auto& p : ::filesystem::directory_iterator(userKeysDir))
     {
         userKeyFiles.push_back(p.path().string());
     }
@@ -229,7 +229,7 @@ bool PhlpReadFile(
     // Read the contents
     //
 #ifndef __linux__
-    cbFile = (unsigned int) std::tr2::sys::file_size(fileName);
+    cbFile = (unsigned int) std::filesystem::file_size(fileName);
 #else
     cbFile = (unsigned int) file_size(fileName);
 #endif

@@ -1,11 +1,12 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio Version 17
+VisualStudioVersion = 17.2.32324.80
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CliTst", "CliTst\CliTst.vcxproj", "{A2E1EB68-D369-4FF3-ADFA-946B04CB4CEF}"
 	ProjectSection(ProjectDependencies) = postProject
 		{9CF79696-FE18-47D8-BEB6-75C6D90124D9} = {9CF79696-FE18-47D8-BEB6-75C6D90124D9}
+		{B6BCA3A6-0A1D-4B8B-AD8F-81C00077DD4E} = {B6BCA3A6-0A1D-4B8B-AD8F-81C00077DD4E}
 		{B89009F8-8EC3-47B2-9EFB-99D6BA776428} = {B89009F8-8EC3-47B2-9EFB-99D6BA776428}
 	EndProjectSection
 EndProject
@@ -58,6 +59,7 @@ Global
 		{B89009F8-8EC3-47B2-9EFB-99D6BA776428}.Release|x86.ActiveCfg = Release|Win32
 		{B89009F8-8EC3-47B2-9EFB-99D6BA776428}.Release|x86.Build.0 = Release|Win32
 		{B6BCA3A6-0A1D-4B8B-AD8F-81C00077DD4E}.Debug|x64.ActiveCfg = Debug|x64
+		{B6BCA3A6-0A1D-4B8B-AD8F-81C00077DD4E}.Debug|x64.Build.0 = Debug|x64
 		{B6BCA3A6-0A1D-4B8B-AD8F-81C00077DD4E}.Debug|x86.ActiveCfg = Debug|Win32
 		{B6BCA3A6-0A1D-4B8B-AD8F-81C00077DD4E}.Debug|x86.Build.0 = Debug|Win32
 		{B6BCA3A6-0A1D-4B8B-AD8F-81C00077DD4E}.Release|x64.ActiveCfg = Release|x64
@@ -75,5 +77,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {D56C7A05-1E6A-4E08-81DE-18CCEF45E6BF}
 	EndGlobalSection
 EndGlobal

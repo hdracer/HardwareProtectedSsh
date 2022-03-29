@@ -526,7 +526,7 @@ _DLLEXP_ enum class TPM_CAP : UINT32;
 /// <summary>
 /// Selector type for TPMU_NAME [TSS]
 /// </summary>
-_DLLEXP_ enum class NameUnionTagValues : byte
+_DLLEXP_ enum class NameUnionTagValues : unsigned char
 {
     TAG_TPMU_NAME_TPMT_HA = 0,
     TAG_TPMU_NAME_TPM_HANDLE = 1
@@ -827,7 +827,7 @@ _DLLEXP_ enum class ImplementationConstants : UINT32
 /// <summary>
 /// Table 4  Defines for Logic Values
 /// </summary>
-_DLLEXP_ enum class Logic : byte
+_DLLEXP_ enum class Logic : unsigned char
 {
     YES = 1,
     NO = 0,
@@ -1743,7 +1743,7 @@ _DLLEXP_ enum class TPM_SU : UINT16
 /// <summary>
 /// This type is used in TPM2_StartAuthSession() to indicate the type of the session to be created.
 /// </summary>
-_DLLEXP_ enum class TPM_SE : byte
+_DLLEXP_ enum class TPM_SE : unsigned char
 {
     HMAC = 0x00,
     POLICY = 0x01,
@@ -2280,7 +2280,7 @@ _DLLEXP_ enum class TPM_PS : UINT32
 /// <summary>
 /// The 32-bit handle space is divided into 256 regions of equal size with 224 values in each. Each of these ranges represents a handle type.
 /// </summary>
-_DLLEXP_ enum class TPM_HT : byte
+_DLLEXP_ enum class TPM_HT : unsigned char
 {
     /// <summary>
     /// PCR  consecutive numbers, starting at 0, that reference the PCR registers
@@ -2819,7 +2819,7 @@ inline TPMA_OBJECT operator|(TPMA_OBJECT _a, TPMA_OBJECT _b){ return static_cast
 /// <summary>
 /// This octet in each session is used to identify the session type, indicate its relationship to any handles in the command, and indicate its use in parameter encryption.
 /// </summary>
-_DLLEXP_ enum class TPMA_SESSION : byte
+_DLLEXP_ enum class TPMA_SESSION : unsigned char
 {
     /// <summary>
     /// SET (1): In a command, this setting indicates that the session is to remain active after successful completion of the command. In a response, it indicates that the session is still active. If SET in the command, this attribute shall be SET in the response.
@@ -2873,7 +2873,7 @@ inline TPMA_SESSION operator|(TPMA_SESSION _a, TPMA_SESSION _b){ return static_c
 /// <summary>
 /// In a TPMS_CREATION_DATA structure, this structure is used to indicate the locality of the command that created the object. No more than one of the locality attributes shall be set in the creation data.
 /// </summary>
-_DLLEXP_ enum class TPMA_LOCALITY : byte
+_DLLEXP_ enum class TPMA_LOCALITY : unsigned char
 {
     LOC_ZERO = 0x1,
     LOC_ONE = 0x2,
@@ -3792,7 +3792,7 @@ class _DLLEXP_ TPMS_PCR_SELECT : public TpmStructureBase
     /// <summary>
     /// the size in octets of the pcrSelect array
     /// </summary>
-    protected: mutable byte sizeofSelect;
+    protected: mutable unsigned char sizeofSelect;
     /// <summary>
     /// the bit map of selected PCR
     /// </summary>
@@ -3826,7 +3826,7 @@ class _DLLEXP_ TPMS_PCR_SELECTION : public TpmStructureBase
     /// <summary>
     /// the size in octets of the pcrSelect array
     /// </summary>
-    protected: mutable byte sizeofSelect;
+    protected: mutable unsigned char sizeofSelect;
     /// <summary>
     /// the bit map of selected PCR
     /// </summary>
@@ -4096,7 +4096,7 @@ class _DLLEXP_ TPMS_TAGGED_PCR_SELECT : public TpmStructureBase
     /// <summary>
     /// the size in octets of the pcrSelect array
     /// </summary>
-    protected: mutable byte sizeofSelect;
+    protected: mutable unsigned char sizeofSelect;
     /// <summary>
     /// the bit map of PCR with the identified property
     /// </summary>

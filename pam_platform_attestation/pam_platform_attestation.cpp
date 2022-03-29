@@ -38,7 +38,7 @@ pam_sm_authenticate(
     // Initialize attestation helper class
     //
 
-    attestationLib.Initialize(std::string("https://strongnetsvc.jwsecure.com"));
+    attestationLib.Initialize(std::wstring(L"https://strongnetsvc.jwsecure.com"), std::wstring(L"https"));
 
     //
     // Establish an AIK
